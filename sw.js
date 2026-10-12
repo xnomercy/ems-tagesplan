@@ -1,6 +1,6 @@
 // Hält die App-Dateien offline bereit. Daten kommen immer frisch von Supabase.
-const CACHE = "tagesplan-v6";
-const SHELL = ["./", "index.html", "style.css", "app.js", "parser.js", "parser-tr.js", "i18n.js", "manifest.webmanifest", "icon-192.png", "ems-logo.png", "ems-mark.png"];
+const CACHE = "tagesplan-v7";
+const SHELL = ["./", "index.html", "style.css", "app.js", "parser.js", "parser-tr.js", "i18n.js", "version.json", "manifest.webmanifest", "icon-192.png", "ems-logo.png", "ems-mark.png"];
 
 self.addEventListener("install", (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener("activate", (e) => e.waitUntil(
@@ -10,7 +10,8 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== location.origin) return;
   // Erst Netz, bei Funkloch der Cache
-  e.respondWith(fetch(e.request).then((res) => {
+  // no-cache: immer beim Server nachfragen, ob es eine neuere Datei gibt
+  e.respondWith(fetch(e.request.url, { cache: "no-cache", credentials: "same-origin" }).then((res) => {
     const copy = res.clone();
     caches.open(CACHE).then((c) => c.put(e.request, copy));
     return res;

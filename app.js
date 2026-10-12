@@ -5,6 +5,8 @@ import { t, LANG, LOCALE, setLang, translateStatic } from "./i18n.js";
 const SUPABASE_URL = "https://hpxdhtuabzqwyslzcmbt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kKiQdntJd893YvBPFx7fhw_FYzlwwtz";
 const DEMO = new URLSearchParams(location.search).has("demo");
+// Bei jeder Veröffentlichung zusammen mit version.json und dem Cache-Namen in sw.js hochzählen
+const APP_VERSION = "7";
 const db = DEMO
   ? (await import("./mock.js")).db
   : (await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm")).createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -90,7 +92,12 @@ function loginError(err) {
 
 async function ensureSetup() {
   const { data: settings } = await db.from("settings").select("*").maybeSingle();
-  if (settings) { state.settings = settings; return; }
+  if (settings) {
+    state.settings = settings;
+    // Sprache auch am Server merken, damit Mitteilungen passend kommen
+    if (settings.lang !== LANG) db.from("settings").update({ lang: LANG }).eq("user_id", settings.user_id).then(() => {});
+    return;
+  }
   const { data: created } = await db.from("settings").insert({}).select().single();
   state.settings = created;
   const { count } = await db.from("routines").select("id", { count: "exact", head: true });
@@ -360,7 +367,7 @@ function renderMehr() {
   $("#copy-feed").onclick = () => navigator.clipboard.writeText(feed).then(() => toast(t("Link kopiert")));
   $("#open-feed").onclick = () => { location.href = feed.replace(/^https:/, "webcal:"); };
   $("#logout").onclick = () => db.auth.signOut();
-  document.querySelectorAll("#lang-seg button").forEach((b) => (b.onclick = () => { setLang(b.dataset.lang); render(); }));
+  document.querySelectorAll("#lang-seg button").forEach((b) => (b.onclick = () => { setLang(b.dataset.lang); render(); saveSettings({ lang: LANG }); }));
 }
 
 // ---------- Push-Mitteilungen ----------
@@ -906,7 +913,28 @@ function toast(msg, undo) {
   toastTimer = setTimeout(() => (el.hidden = true), undo ? 6000 : 3000);
 }
 
-document.addEventListener("visibilitychange", () => { if (!document.hidden && state.user) refresh(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden && state.user) refresh(); if (!document.hidden) checkVersion(); });
+
+// ---------- Neue Version ----------
+async function checkVersion() {
+  if (DEMO && !new URLSearchParams(location.search).has("v")) return;
+  try {
+    const res = await fetch(`version.json?t=${Date.now()}`, { cache: "no-store" });
+    const { v } = await res.json();
+    if (v === APP_VERSION) return;
+    const bar = $("#update");
+    bar.innerHTML = `<span>${t("Neue Version verfügbar")}</span><button>${t("Aktualisieren")}</button>`;
+    bar.hidden = false;
+    bar.querySelector("button").onclick = async () => {
+      bar.querySelector("button").textContent = "…";
+      try { for (const k of await caches.keys()) await caches.delete(k); } catch {}
+      try { const reg = await navigator.serviceWorker?.getRegistration(); await reg?.update(); } catch {}
+      location.reload();
+    };
+  } catch {}
+}
+setInterval(checkVersion, 10 * 60 * 1000);
+checkVersion();
 
 translateStatic();
 document.documentElement.lang = LANG;

@@ -11,6 +11,17 @@ const APP_URL = "https://xnomercy.github.io/ems-tagesplan/";
 const END_OF_DAY = 23 * 60 + 30; // danach ist Ruhe
 const MAX_NAG = 5 * 60; // höchstens 5 Stunden lang nachhaken
 
+// Texte der Mitteilungen in der eingestellten App-Sprache
+const TXT = {
+  de: { testT: "Mitteilungen sind an", testB: "So erinnert dich dein Tagesplan.", prayer: (t: string) => `Gebet: ${t}`, prayerB: (t: string, at: string) => `Zeit für ${t} (${at})`,
+    open: "Noch nicht abgehakt", termin: (t: string) => `Termin: ${t}`, at: (t: string) => `um ${t}`, still: "Noch offen", tomorrow: "Morgen",
+    tasks: (n: number, late: number) => `${n} offene ${n === 1 ? "Aufgabe" : "Aufgaben"}${late ? `, ${late} überfällig` : ""}`, nth: (n: number) => `${n}. Erinnerung` },
+  tr: { testT: "Bildirimler açık", testB: "Tagesplan sana böyle hatırlatır.", prayer: (t: string) => `Namaz: ${t}`, prayerB: (t: string, at: string) => `${t} vakti (${at})`,
+    open: "Henüz işaretlenmedi", termin: (t: string) => `Randevu: ${t}`, at: (t: string) => `saat ${t}`, still: "Hâlâ açık", tomorrow: "Yarın",
+    tasks: (n: number, late: number) => `${n} açık görev${late ? `, ${late} gecikmiş` : ""}`, nth: (n: number) => `${n}. hatırlatma` },
+};
+const PRAYER_TR: Record<string, string> = { fajr: "Sabah", dhuhr: "Öğle", asr: "İkindi", maghrib: "Akşam", isha: "Yatsı" };
+
 const toMin = (t: string) => { const [h, m] = t.slice(0, 5).split(":").map(Number); return h * 60 + m; };
 const fmt = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 
@@ -36,11 +47,13 @@ Deno.serve(async (req) => {
     const { data: { user } } = await db.auth.getUser(jwt);
     if (!user) return new Response("Nicht erlaubt", { status: 401, headers: cors });
     const { data: mine } = await db.from("push_subscriptions").select("*").eq("user_id", user.id);
+    const { data: st } = await db.from("settings").select("lang").eq("user_id", user.id).maybeSingle();
+    const tx = TXT[st?.lang === "tr" ? "tr" : "de"];
     let ok = 0;
     for (const s of mine ?? []) {
       try {
         await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
-          JSON.stringify({ title: "Mitteilungen sind an", body: "So erinnert dich dein Tagesplan.", tag: "test", url: APP_URL }));
+          JSON.stringify({ title: tx.testT, body: tx.testB, tag: "test", url: APP_URL }));
         ok++;
       } catch (e) { console.error("test push fehlgeschlagen", String(e)); }
     }
@@ -57,6 +70,8 @@ Deno.serve(async (req) => {
   for (const uid of users) {
     const { data: settings } = await db.from("settings").select("*").eq("user_id", uid).maybeSingle();
     if (!settings) continue;
+    const tr = settings.lang === "tr";
+    const tx = TXT[tr ? "tr" : "de"];
 
     // Gebetszeiten des Tages, einmal pro Tag geholt
     let pt = settings.pt_cache?.date === now.date ? settings.pt_cache.timings : null;
@@ -95,8 +110,9 @@ Deno.serve(async (req) => {
         const next = PRAYERS[PRAYERS.indexOf(r.prayer) + 1];
         until = next && prayerMin(next) != null ? prayerMin(next)! : END_OF_DAY;
       }
-      const body = r.prayer ? `Zeit für ${r.title} (${fmt(at)})` : `${fmt(at)} · ${r.notes ?? "Noch nicht abgehakt"}`;
-      due.push({ key: `r:${r.id}:${now.date}`, title: r.prayer ? `Gebet: ${r.title}` : r.title, body, at, until, high: r.priority === "hoch" });
+      const pname = tr && r.prayer ? PRAYER_TR[r.prayer] : r.title;
+      const body = r.prayer ? tx.prayerB(pname, fmt(at)) : `${fmt(at)} · ${r.notes ?? tx.open}`;
+      due.push({ key: `r:${r.id}:${now.date}`, title: r.prayer ? tx.prayer(pname) : r.title, body, at, until, high: r.priority === "hoch" });
     }
     for (const i of items ?? []) {
       if (!i.start_time || i.on_date < now.date) continue;
@@ -104,7 +120,7 @@ Deno.serve(async (req) => {
       const dayOffset = Math.round((Date.parse(i.on_date) - Date.parse(now.date)) / 864e5) * 1440;
       const at = dayOffset + toMin(i.start_time) - (i.remind_before ?? (i.kind === "termin" ? 15 : 0));
       if (at > 24 * 60) continue;
-      due.push({ key: `i:${i.id}`, title: i.kind === "termin" ? `Termin: ${i.title}` : i.title, body: [dayOffset ? "Morgen" : "", i.kind === "termin" ? `um ${i.start_time.slice(0, 5)}` : "Noch offen", i.location ?? ""].filter(Boolean).join(" · "),
+      due.push({ key: `i:${i.id}`, title: i.kind === "termin" ? tx.termin(i.title) : i.title, body: [dayOffset ? tx.tomorrow : "", i.kind === "termin" ? tx.at(i.start_time.slice(0, 5)) : tx.still, i.location ?? ""].filter(Boolean).join(" · "),
         at, until: END_OF_DAY, high: i.priority === "hoch" && i.kind === "aufgabe" });
     }
     // Offene Aufgaben ohne Uhrzeit: Sammel-Erinnerung um 9 und 17 Uhr
@@ -112,7 +128,7 @@ Deno.serve(async (req) => {
     if (open.length) {
       for (const slot of [9 * 60, 17 * 60]) {
         const late = open.filter((i) => i.on_date < now.date).length;
-        due.push({ key: `t:${now.date}:${slot}`, title: `${open.length} offene ${open.length === 1 ? "Aufgabe" : "Aufgaben"}${late ? `, ${late} überfällig` : ""}`,
+        due.push({ key: `t:${now.date}:${slot}`, title: tx.tasks(open.length, late),
           body: open.slice(0, 4).map((i) => i.title).join(" · "), at: slot, until: slot + 60, high: false });
       }
     }
@@ -128,7 +144,7 @@ Deno.serve(async (req) => {
       }
       const count = (prev?.sent_count ?? 0) + 1;
       const payload = JSON.stringify({
-        title: count > 1 ? `${d.title} (${count}. Erinnerung)` : d.title,
+        title: count > 1 ? `${d.title} (${tx.nth(count)})` : d.title,
         body: d.body, tag: d.key, high: d.high, url: APP_URL,
       });
       for (const s of (subs ?? []).filter((s) => s.user_id === uid)) {

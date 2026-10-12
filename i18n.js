@@ -212,6 +212,8 @@ const TR = {
   "Stunde": "Saat",
   "Minute": "Dakika",
   "Keine Uhrzeit": "Saat yok",
+  "Neue Version verfügbar": "Yeni sürüm hazır",
+  "Aktualisieren": "Güncelle",
   "Mo": "Pzt", "Di": "Sal", "Mi": "Çar", "Do": "Per", "Fr": "Cum", "Sa": "Cmt", "So": "Paz",
 };
 

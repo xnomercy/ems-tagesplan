@@ -340,3 +340,10 @@ button.pick.empty { color: var(--muted); font-weight: 400; }
 .grid-pick button { aspect-ratio: auto; min-height: 42px; }
 .pick-time-show { text-align: center; font-size: 34px; font-weight: 800; margin: 14px 0 4px; letter-spacing: .02em; }
 #picker .primary:disabled { opacity: .5; }
+
+/* Hinweis auf neue Version */
+#update { position: fixed; top: calc(10px + env(safe-area-inset-top)); left: 16px; right: 16px; max-width: 608px; margin: 0 auto; z-index: 50;
+  display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 16px; border-radius: 16px;
+  background: var(--petrol); color: #fff; font-weight: 700; box-shadow: 0 10px 30px rgba(7,31,38,.35); animation: sheet-up .3s ease; }
+#update span { flex: 1; }
+#update button { border: 0; border-radius: 12px; padding: 10px 14px; background: #fff; color: var(--petrol); font: inherit; font-weight: 800; }
