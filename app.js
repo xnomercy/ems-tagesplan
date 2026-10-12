@@ -7,7 +7,7 @@ const SUPABASE_URL = "https://hpxdhtuabzqwyslzcmbt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kKiQdntJd893YvBPFx7fhw_FYzlwwtz";
 const DEMO = new URLSearchParams(location.search).has("demo");
 // Bei jeder Veröffentlichung zusammen mit version.json und dem Cache-Namen in sw.js hochzählen
-const APP_VERSION = "9";
+const APP_VERSION = "10";
 const db = DEMO
   ? (await import("./mock.js")).db
   : (await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm")).createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -193,7 +193,7 @@ function itemHtml(e, { next = false, showTime = false } = {}) {
   if (e.kind !== "routine" && cl.length) badge += `<span class="badge">${cl.filter((c) => c.d).length}/${cl.length}</span>`;
   const areaLabel = e.kind !== "routine" && e.raw?.area ? " · " + (AREAS[e.raw.area] ?? e.raw.area) : "";
   const end = e.end ? t(" bis {t}", { t: e.end }) : "";
-  return `<div class="card-item ${e.kind} ${e.done ? "done" : ""} ${next ? "next" : ""}" data-detail="${e.id}" role="button" tabindex="0">
+  return `<div class="card-item ${e.kind} ${e.done ? "done" : ""} ${next ? "next" : ""}" data-detail="${e.id}" data-swipe="${e.kind}:${e.id}" role="button" tabindex="0">
     <div class="body">
       <div class="cat"><i></i>${label}${areaLabel}${showTime && e.time ? " · " + e.time : ""}${end} ${badge}</div>
       <div class="title">${esc(e.title)}</div>
@@ -277,7 +277,7 @@ function renderPlan() {
     const list = groups[key];
     if (!list) continue;
     html += `<p class="eyebrow" style="margin-top:18px">${byTime ? t(label) : label}</p>`;
-    html += list.map((r) => `<button class="list-item ${r.active ? "" : "off"}" data-edit-routine="${r.id}">
+    html += list.map((r) => `<button class="list-item ${r.active ? "" : "off"}" data-edit-routine="${r.id}" data-swipe="routine:${r.id}">
       <div class="tm">${routineWhen(r)}</div>
       <div class="body"><div class="title">${esc(r.title)}</div>
       <div class="sub">${r.days.length === 7 ? t("täglich") : r.days.map((d) => DAY_SHORT[d - 1]).join(", ")}${r.notes ? " · " + esc(r.notes) : ""}</div></div>
@@ -1015,6 +1015,76 @@ async function runIntent(c) {
     case "erinnerung": return update({ remind_before: c.minutes }, `${t("Erinnerung")}: ${e.title} · ${c.minutes >= 60 ? t("{n} Std. vorher", { n: c.minutes / 60 }) : t("{n} Min. vorher", { n: c.minutes })}`);
     case "checkliste": return update({ checklist: [...(raw.checklist ?? []), { t: c.item, d: false }] }, t("{y} auf {x}", { x: e.title, y: c.item }));
   }
+}
+
+// ---------- Nach links wischen: Löschen-Knopf ----------
+const SWIPE_W = 92;
+let swipe = null, swOpen = null;
+function closeSwipe() {
+  if (!swOpen) return;
+  const el = swOpen;
+  el.style.transform = "";
+  setTimeout(() => el._del?.remove(), 200);
+  swOpen = null;
+}
+function delButton(el) {
+  if (el._del?.isConnected) return el._del;
+  const host = el.parentElement;
+  if (getComputedStyle(host).position === "static") host.style.position = "relative";
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "swipe-del";
+  b.textContent = t("Löschen");
+  b.style.top = el.offsetTop + "px";
+  b.style.height = el.offsetHeight + "px";
+  b.onclick = (ev) => { ev.stopPropagation(); const [kind, id] = el.dataset.swipe.split(":"); closeSwipe(); deleteEntry(kind, id); };
+  host.insertBefore(b, el);
+  el._del = b;
+  return b;
+}
+document.addEventListener("touchstart", (e) => {
+  const el = e.target.closest("[data-swipe]");
+  if (swOpen && el !== swOpen && !e.target.closest(".swipe-del")) closeSwipe();
+  if (!el) { swipe = null; return; }
+  swipe = { el, x0: e.touches[0].clientX, y0: e.touches[0].clientY, dx: 0, dir: null, base: el === swOpen ? -SWIPE_W : 0 };
+}, { passive: true });
+document.addEventListener("touchmove", (e) => {
+  if (!swipe) return;
+  const dx = e.touches[0].clientX - swipe.x0, dy = e.touches[0].clientY - swipe.y0;
+  if (!swipe.dir && Math.abs(dx) + Math.abs(dy) > 8) swipe.dir = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+  if (swipe.dir !== "x") return;
+  e.preventDefault();
+  swipe.dx = dx;
+  delButton(swipe.el);
+  swipe.el.style.transition = "none";
+  swipe.el.style.transform = `translateX(${Math.min(0, Math.max(-SWIPE_W - 30, swipe.base + dx))}px)`;
+}, { passive: false });
+document.addEventListener("touchend", () => {
+  if (!swipe) return;
+  const { el, dir, dx, base } = swipe;
+  swipe = null;
+  if (dir !== "x") return;
+  el.style.transition = "";
+  if (base + dx < -SWIPE_W / 2) { el.style.transform = `translateX(-${SWIPE_W}px)`; swOpen = el; el._swiped = Date.now(); }
+  else { swOpen = el; closeSwipe(); el._swiped = Date.now(); }
+});
+// Nach einem Wisch nicht gleichzeitig die Details öffnen
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-swipe]");
+  if (el && (el === swOpen || Date.now() - (el._swiped ?? 0) < 400)) { e.stopPropagation(); e.preventDefault(); if (el === swOpen) closeSwipe(); }
+}, true);
+
+async function deleteEntry(kind, id) {
+  const isRoutine = kind === "routine";
+  const table = isRoutine ? "routines" : "items";
+  const raw = isRoutine ? state.routines.find((r) => r.id === id) : findEntry(id)?.raw ?? findEntry(id);
+  if (!raw) return;
+  if (isRoutine && !confirm(t("Routine „{x}“ ganz löschen?", { x: raw.title }))) return;
+  const { error } = await db.from(table).delete().eq("id", id);
+  if (error) return toast(error.message);
+  state.upcoming = null;
+  toast(t("Gelöscht: {x}", { x: raw.title }), async () => { await db.from(table).insert(raw); refresh(); });
+  refresh();
 }
 
 // Hilfe: was die Sprachsteuerung versteht, mit Beispielen zum Antippen

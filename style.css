@@ -349,3 +349,9 @@ button.pick.empty { color: var(--muted); font-weight: 400; }
 #update button { border: 0; border-radius: 12px; padding: 10px 14px; background: #fff; color: var(--petrol); font: inherit; font-weight: 800; }
 .help-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .help-list .chip { text-align: left; white-space: normal; }
+
+/* Nach links wischen zum Löschen */
+[data-swipe] { position: relative; z-index: 1; transition: transform .2s ease; touch-action: pan-y; }
+.swipe-del { position: absolute; right: 0; width: 120px; z-index: 0; border: 0; border-radius: var(--radius);
+  background: var(--danger); color: #fff; font: inherit; font-weight: 800; padding: 0 16px 0 0; text-align: right; }
+.list-item[data-swipe] { position: relative; }
