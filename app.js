@@ -1,13 +1,13 @@
 import { parse, isoDate } from "./parser.js";
 import { parseTr } from "./parser-tr.js";
-import { parseIntent, extractPrio } from "./intents.js";
+import { parseIntent, extractPrio, extractRepeat } from "./intents.js";
 import { t, LANG, LOCALE, setLang, translateStatic } from "./i18n.js";
 
 const SUPABASE_URL = "https://hpxdhtuabzqwyslzcmbt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kKiQdntJd893YvBPFx7fhw_FYzlwwtz";
 const DEMO = new URLSearchParams(location.search).has("demo");
 // Bei jeder Veröffentlichung zusammen mit version.json und dem Cache-Namen in sw.js hochzählen
-const APP_VERSION = "14";
+const APP_VERSION = "15";
 const db = DEMO
   ? (await import("./mock.js")).db
   : (await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm")).createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -25,6 +25,9 @@ const CATEGORIES = L({ gebet: "Gebet", lesen: "Lesen", training: "Training", sup
 const AREAS = L({ arbeit: "Arbeit", privat: "Privat", gesundheit: "Gesundheit", familie: "Familie", finanzen: "Finanzen", haushalt: "Haushalt" });
 const VAPID_PUBLIC = "BNV7U2HOxe9fvDt3Ni1eyeGrlVFLT5stsCgcKnU3pF9Ajqu5OWhv0b6qoLrtdcpFtH3J_3gK9CMu4uFbiAbKCk8";
 const PRAYER_API = { fajr: "Fajr", dhuhr: "Dhuhr", asr: "Asr", maghrib: "Maghrib", isha: "Isha" };
+const REPEATS = { taeglich: "Täglich", woechentlich: "Wöchentlich", monatlich: "Monatlich", jaehrlich: "Jährlich" };
+// Supplement-Stack zum schnellen Anlegen im Vorrat
+const STACK = ["Vitamin D3+K2", "Schwarzkümmelöl", "Liposomales Vitamin C", "Vitamin B12", "Lion's Mane", "OPC", "Bor", "Chlorella", "Gerstengras", "Magnesium Komplex", "Ashwagandha"];
 const CHECK_SVG = '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
 
 const state = { user: null, day: new Date(), routines: [], settings: null, entries: [], open: [], view: "heute" };
@@ -124,10 +127,19 @@ async function prayerTimes(date) {
   } catch { return null; }
 }
 
+// Wiederkehrende Termine und Aufgaben: nächste Folge anlegen (macht die Datenbank auch stündlich)
+let lastAdvance = 0;
+async function advanceSeries(force = false) {
+  if (!force && Date.now() - lastAdvance < 10 * 60 * 1000) return;
+  lastAdvance = Date.now();
+  await db.rpc("advance_series");
+}
+
 async function refresh() {
   const day = isoDate(state.day);
   const today = isoDate(new Date());
-  const [r, c, i, pt, open] = await Promise.all([
+  await advanceSeries();
+  const [r, c, i, pt, open, sup] = await Promise.all([
     db.from("routines").select("*").order("at_time", { nullsFirst: false }),
     db.from("completions").select("routine_id").eq("on_date", day),
     db.from("items").select("*").eq("on_date", day).order("start_time", { nullsFirst: false }),
@@ -135,10 +147,12 @@ async function refresh() {
     // Offene Aufgaben mit Frist: überfällige und die der nächsten 14 Tage
     db.from("items").select("*").eq("kind", "aufgabe").eq("done", false)
       .gte("on_date", isoDate(addDays(new Date(), -60))).lte("on_date", isoDate(addDays(new Date(), 14))).order("on_date"),
+    db.from("supplies").select("*").order("name"),
   ]);
   if (r.error) { toast(t("Laden fehlgeschlagen: {x}", { x: r.error.message })); return; }
   state.routines = r.data;
   state.pt = pt;
+  state.supplies = sup.data ?? [];
   const done = new Set((c.data ?? []).map((x) => x.routine_id));
   const wd = weekday(state.day);
 
@@ -185,10 +199,11 @@ function itemHtml(e, { next = false, showTime = false } = {}) {
   const label = e.kind === "termin" ? t("Termin") : e.kind === "aufgabe" ? t("Aufgabe") : CATEGORIES[e.category] ?? "";
   const today = isoDate(new Date());
   let badge = "";
-  if (e.kind === "aufgabe" && e.on_date && e.on_date !== isoDate(state.day)) {
+  if (e.kind === "aufgabe" && !e.done && e.on_date && e.on_date !== isoDate(state.day)) {
     badge = e.on_date < today ? `<span class="badge late">${t("überfällig")}</span>` : `<span class="badge">${t("bis {d}", { d: fmtDay(e.on_date, { weekday: "short" }) })}</span>`;
   }
   if (e.priority === "hoch") badge += `<span class="badge prio">${t("Wichtig")}</span>`;
+  if (e.kind !== "routine" && e.raw?.repeat) badge += `<span class="badge">↻ ${t(REPEATS[e.raw.repeat])}</span>`;
   const cl = e.raw?.checklist ?? [];
   if (e.kind !== "routine" && cl.length) badge += `<span class="badge">${cl.filter((c) => c.d).length}/${cl.length}</span>`;
   const areaLabel = e.kind !== "routine" && e.raw?.area ? " · " + (AREAS[e.raw.area] ?? e.raw.area) : "";
@@ -234,6 +249,8 @@ function renderDay() {
     <div class="meta"><span>${t("Fortschritt")}</span><span>${done} / ${total} · ${pct}%</span></div>
   </section>`;
   html += dayStrip();
+  const low = lowSupplies();
+  if (isToday && low.length) html += `<div class="hint warn">${t("Vorrat")}: ${low.map((x) => `${esc(x.name)} ${supplyDays(x) <= 0 ? t("leer") : t("noch {n} Tage", { n: supplyDays(x) })}`).join(", ")} <button data-goto="mehr">${t("Ansehen")}</button></div>`;
   if (state.settings && state.settings.lat == null) html += `<div class="hint">${t("Für automatische Gebetszeiten einmal den Standort setzen.")} <button data-goto="mehr">${t("Jetzt einrichten")}</button></div>`;
 
   if (timed.length) {
@@ -288,35 +305,130 @@ function renderPlan() {
   $("#view-plan").querySelectorAll("#group-seg button").forEach((b) => (b.onclick = () => { setPlanGroup(b.dataset.g); renderPlan(); }));
 }
 
+// Termine: Liste, Monat oder Verlauf, dazu eine Suche über alle Einträge
+const toEntry = (i) => ({ kind: i.kind, id: i.id, title: i.title, time: hhmm(i.start_time) || null, end: hhmm(i.end_time), done: i.done, notes: i.notes, raw: i, on_date: i.on_date, priority: i.priority, location: i.location });
+state.termMode = "liste";
+state.search = "";
+
 async function renderTermine() {
-  const { data } = await db.from("items").select("*").gte("on_date", isoDate(new Date())).order("on_date").order("start_time", { nullsFirst: false });
+  const { data } = await db.from("items").select("*").order("on_date").order("start_time", { nullsFirst: false }).limit(3000);
+  state.allItems = data ?? [];
+  state.termineCache = state.allItems;
+  const view = $("#view-termine");
+  if (!view.querySelector("#t-body")) {
+    view.innerHTML = `<div class="search"><input id="t-search" type="search" enterkeyhint="search" autocomplete="off" placeholder="${t("Suchen in allen Einträgen")}"></div>
+      <div class="seg" id="term-seg">${[["liste", "Liste"], ["monat", "Monat"], ["verlauf", "Verlauf"]].map(([v, n]) => `<button type="button" data-mode="${v}">${t(n)}</button>`).join("")}</div>
+      <div id="t-body"></div>
+      <button class="primary" id="new-item">${t("Termin oder Aufgabe anlegen")}</button>`;
+    $("#t-search").oninput = (e) => { state.search = e.target.value; renderTermBody(); };
+    view.querySelectorAll("#term-seg button").forEach((b) => (b.onclick = () => { state.termMode = b.dataset.mode; state.search = ""; $("#t-search").value = ""; renderTermBody(); }));
+  }
+  if ($("#t-search").value !== state.search) $("#t-search").value = state.search;
+  renderTermBody();
+}
+
+function renderTermBody() {
+  const body = $("#t-body");
+  if (!body) return;
+  $("#view-termine").querySelectorAll("#term-seg button").forEach((b) => b.classList.toggle("on", !state.search && b.dataset.mode === state.termMode));
+  const q = state.search.trim().toLocaleLowerCase(LOCALE());
+  body.innerHTML = q ? searchHtml(q) : ({ liste: listHtml, monat: monthHtml, verlauf: historyHtml })[state.termMode]();
+  body.querySelectorAll("[data-area]").forEach((b) => (b.onclick = () => { state.areaFilter = b.dataset.area; renderTermBody(); }));
+  body.querySelectorAll("[data-month]").forEach((b) => (b.onclick = () => { const m = state.month; state.month = new Date(m.getFullYear(), m.getMonth() + Number(b.dataset.month), 1); renderTermBody(); }));
+  body.querySelectorAll("[data-mday]").forEach((b) => (b.onclick = () => { state.monthSel = b.dataset.mday; renderTermBody(); }));
+}
+
+function listHtml() {
+  const data = state.allItems.filter((i) => i.on_date >= isoDate(new Date()));
   const f = state.areaFilter ?? "";
-  const shown = (data ?? []).filter((i) => !f || i.area === f);
+  const shown = data.filter((i) => !f || i.area === f);
   const termine = shown.filter((i) => i.kind === "termin");
   const aufgaben = shown.filter((i) => i.kind === "aufgabe" && !i.done);
-  state.termineCache = data ?? [];
-  const toEntry = (i) => ({ kind: i.kind, id: i.id, title: i.title, time: hhmm(i.start_time) || null, end: hhmm(i.end_time), done: i.done, notes: i.notes, raw: i, on_date: i.on_date, priority: i.priority, location: i.location });
-  const used = [...new Set((data ?? []).map((i) => i.area).filter(Boolean))];
+  const used = [...new Set(data.map((i) => i.area).filter(Boolean))];
   let html = used.length ? `<div class="chips">${[["", t("Alle")], ...used.map((a) => [a, AREAS[a] ?? a])]
     .map(([v, n]) => `<button class="chip ${f === v ? "on" : ""}" data-area="${v}">${n}</button>`).join("")}</div>` : "";
   html += `<div class="section-head"><h3>${t("Kommende Termine")}</h3></div>`;
   if (!termine.length) html += `<div class="empty">${t("Keine Termine.")}</div>`;
   let last = "";
-  for (const t of termine) {
-    if (t.on_date !== last) { html += `<p class="eyebrow" style="margin-top:14px">${fmtDay(t.on_date, { weekday: "long", day: "numeric", month: "long" })}</p>`; last = t.on_date; }
-    html += `<div class="slot"><div class="t">${hhmm(t.start_time)}</div>${itemHtml(toEntry(t))}</div>`;
+  for (const x of termine) {
+    if (x.on_date !== last) { html += `<p class="eyebrow" style="margin-top:14px">${fmtDay(x.on_date, { weekday: "long", day: "numeric", month: "long" })}</p>`; last = x.on_date; }
+    html += `<div class="slot"><div class="t">${hhmm(x.start_time)}</div>${itemHtml(toEntry(x))}</div>`;
   }
   html += `<div class="section-head"><h3>${t("Aufgaben")}</h3></div>`;
   html += aufgaben.length ? aufgaben.map((a) => `<div class="slot"><div class="t small">${fmtDay(a.on_date, { day: "numeric", month: "numeric" })}</div>${itemHtml(toEntry(a), { showTime: true })}</div>`).join("") : `<div class="empty">${t("Keine offenen Aufgaben.")}</div>`;
-  html += `<button class="primary" id="new-item">${t("Termin oder Aufgabe anlegen")}</button>`;
-  $("#view-termine").innerHTML = html;
-  $("#view-termine").querySelectorAll("[data-area]").forEach((b) => (b.onclick = () => { state.areaFilter = b.dataset.area; renderTermine(); }));
+  return html;
+}
+
+function monthHtml() {
+  const today = isoDate(new Date());
+  state.month ??= new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  state.monthSel ??= today;
+  const m = state.month;
+  const byDay = {};
+  for (const i of state.allItems) (byDay[i.on_date] ??= []).push(i);
+  const first = (m.getDay() + 6) % 7;
+  const days = new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate();
+  let cells = "";
+  for (let k = 0; k < first; k++) cells += `<span></span>`;
+  for (let d = 1; d <= days; d++) {
+    const iso = isoDate(new Date(m.getFullYear(), m.getMonth(), d));
+    const list = byDay[iso] ?? [];
+    const dots = list.slice(0, 4).map((i) => `<i class="dot ${i.kind} ${i.done ? "done" : ""} ${i.priority === "hoch" && !i.done ? "prio" : ""}"></i>`).join("");
+    cells += `<button type="button" data-mday="${iso}" class="${iso === state.monthSel ? "sel" : ""} ${iso === today ? "today" : ""}"><b>${d}</b><span class="dots">${dots}</span></button>`;
+  }
+  const sel = (byDay[state.monthSel] ?? []).slice().sort((a, b) => (a.start_time ?? "99").localeCompare(b.start_time ?? "99"));
+  return `<div class="cal-head">
+      <button type="button" class="cal-nav" data-month="-1" aria-label="‹">‹</button>
+      <b>${m.toLocaleDateString(LOCALE(), { month: "long", year: "numeric" })}</b>
+      <button type="button" class="cal-nav" data-month="1" aria-label="›">›</button>
+    </div>
+    <div class="cal month">${DAY_SHORT.map((d) => `<i>${d}</i>`).join("")}${cells}</div>
+    <div class="section-head"><h3>${fmtDay(state.monthSel, { weekday: "long", day: "numeric", month: "long" })}</h3><button class="link-btn" data-open-day="${state.monthSel}">${t("Tag öffnen")}</button></div>
+    ${sel.length ? sel.map((i) => `<div class="slot"><div class="t">${hhmm(i.start_time)}</div>${itemHtml(toEntry(i))}</div>`).join("") : `<div class="empty">${t("Nichts eingetragen.")}</div>`}`;
+}
+
+function historyHtml() {
+  const done = state.allItems.filter((i) => i.done).sort((a, b) => (b.done_at ?? b.on_date).localeCompare(a.done_at ?? a.on_date)).slice(0, 200);
+  const weekAgo = Date.now() - 7 * 864e5;
+  const week = done.filter((i) => i.done_at && Date.parse(i.done_at) > weekAgo).length;
+  let html = `<div class="section-head"><h3>${t("Erledigt")}</h3><span class="muted">${t("{n} in den letzten 7 Tagen", { n: week })}</span></div>`;
+  if (!done.length) return html + `<div class="empty">${t("Noch nichts erledigt.")}</div>`;
+  let last = "";
+  for (const i of done) {
+    const d = i.done_at ? isoDate(new Date(i.done_at)) : i.on_date;
+    if (d !== last) { html += `<p class="eyebrow" style="margin-top:14px">${fmtDay(d, { weekday: "long", day: "numeric", month: "long" })}</p>`; last = d; }
+    html += `<div class="slot"><div class="t small">${i.done_at ? new Date(i.done_at).toTimeString().slice(0, 5) : ""}</div>${itemHtml(toEntry(i))}</div>`;
+  }
+  return html;
+}
+
+function searchHtml(q) {
+  const words = q.split(/\s+/).filter(Boolean);
+  const text = (i) => [i.title, i.notes, i.location, ...(i.checklist ?? []).map((c) => c.t)].filter(Boolean).join(" ").toLocaleLowerCase(LOCALE());
+  const hits = state.allItems.filter((i) => words.every((w) => text(i).includes(w))).sort((a, b) => b.on_date.localeCompare(a.on_date)).slice(0, 100);
+  let html = `<div class="section-head"><h3>${t("Suche")}</h3><span class="muted">${t("{n} Treffer", { n: hits.length })}</span></div>`;
+  if (!hits.length) return html + `<div class="empty">${t("Nichts gefunden.")}</div>`;
+  return html + hits.map((i) => `<div class="slot"><div class="t small">${fmtDay(i.on_date, { day: "numeric", month: "numeric", year: "2-digit" })}</div>${itemHtml(toEntry(i), { showTime: true })}</div>`).join("");
 }
 
 function renderMehr() {
   const s = state.settings ?? {};
   const feed = `${SUPABASE_URL}/functions/v1/kalender?token=${s.calendar_token}`;
   $("#view-mehr").innerHTML = `
+    <div class="section-head" id="vorrat"><h3>${t("Supplement-Vorrat")}</h3><span class="muted">${t("{n} Einträge", { n: state.supplies.length })}</span></div>
+    <div class="card supplies">
+      ${state.supplies.length ? state.supplies.map((x) => {
+        const left = supplyLeft(x), days = supplyDays(x), low = days <= (x.warn_days ?? 7);
+        return `<div class="sup-row ${low ? "low" : ""}">
+          <button type="button" class="sup-main" data-sup="${x.id}"><b>${esc(x.name)}</b>
+            <span class="small ${low ? "warn-text" : "muted"}">${fmtNum(left)} ${esc(t(x.unit))} · ${days <= 0 ? t("leer") : t("reicht {n} Tage", { n: days })}</span></button>
+          <button type="button" class="btn sup-refill" data-refill="${x.id}">${t("Auffüllen")}</button>
+        </div>`;
+      }).join("") : `<p class="small muted">${t("Trag ein, wie viel du von jedem Supplement hast. Die App zieht täglich ab und warnt, bevor es leer ist.")}</p>`}
+      ${STACK.filter((n) => !state.supplies.some((x) => x.name.toLowerCase() === n.toLowerCase())).length ? `<p class="small muted" style="margin-top:12px">${t("Aus deinem Stack")}</p>
+      <div class="chips">${STACK.filter((n) => !state.supplies.some((x) => x.name.toLowerCase() === n.toLowerCase())).map((n) => `<button type="button" class="chip" data-sup-new="${esc(n)}">+ ${esc(n)}</button>`).join("")}</div>` : ""}
+      <button class="btn fill" id="sup-add">${t("Supplement hinzufügen")}</button>
+    </div>
     <div class="section-head"><h3>${t("Einstellungen")}</h3></div>
     <div class="card">
       <p class="eyebrow">${t("Sprache")}</p>
@@ -368,6 +480,16 @@ function renderMehr() {
         <button class="btn fill">${t("Passwort speichern")}</button>
       </form>
     </div>
+    <div class="card">
+      <p class="eyebrow">${t("App-Sperre")}</p>
+      <p class="small" id="lock-state">${lockId() ? t("Beim Öffnen fragt die App nach Face ID.") : t("Sperrt die App beim Öffnen und nach einer Minute im Hintergrund. Entsperren mit Face ID oder Code des iPhones.")}</p>
+      <button class="btn ${lockId() ? "" : "fill"}" id="lock-toggle">${t(lockId() ? "App-Sperre ausschalten" : "Mit Face ID sperren")}</button>
+    </div>
+    <div class="card">
+      <p class="eyebrow">${t("Deine Daten")}</p>
+      <p class="small">${t("Alle Routinen, Termine, Aufgaben, Erledigt-Häkchen und den Vorrat als Datei sichern.")}</p>
+      <button class="btn" id="export">${t("Daten exportieren")}</button>
+    </div>
     <div class="card"><p class="small muted">${t("Angemeldet als {x}", { x: esc(state.user?.email) })}</p><button class="btn danger" id="logout">${t("Abmelden")}</button></div>`;
   $("#pw-form").onsubmit = async (e) => {
     e.preventDefault();
@@ -391,7 +513,79 @@ function renderMehr() {
   $("#open-feed").onclick = () => { location.href = feed.replace(/^https:/, "webcal:"); };
   $("#logout").onclick = () => db.auth.signOut();
   document.querySelectorAll("#theme-seg button").forEach((b) => (b.onclick = () => { setTheme(b.dataset.theme); renderMehr(); }));
-  document.querySelectorAll("#lang-seg button").forEach((b) => (b.onclick = () => { setLang(b.dataset.lang); render(); saveSettings({ lang: LANG }); }));
+  document.querySelectorAll("#lang-seg button").forEach((b) => (b.onclick = () => { setLang(b.dataset.lang); $("#view-termine").innerHTML = ""; render(); saveSettings({ lang: LANG }); }));
+  $("#view-mehr").querySelectorAll("[data-sup]").forEach((b) => (b.onclick = () => openSupplySheet(state.supplies.find((x) => x.id === b.dataset.sup))));
+  $("#view-mehr").querySelectorAll("[data-refill]").forEach((b) => (b.onclick = () => openRefill(state.supplies.find((x) => x.id === b.dataset.refill))));
+  $("#view-mehr").querySelectorAll("[data-sup-new]").forEach((b) => (b.onclick = () => openSupplySheet({ name: b.dataset.supNew })));
+  $("#sup-add").onclick = () => openSupplySheet();
+  $("#lock-toggle").onclick = toggleLock;
+  $("#export").onclick = exportData;
+}
+
+// ---------- Supplement-Vorrat ----------
+const fmtNum = (n) => (Math.round(n * 10) / 10).toLocaleString(LOCALE());
+const daysSince = (iso) => Math.max(0, Math.floor((Date.parse(isoDate(new Date()) + "T12:00") - Date.parse(iso + "T12:00")) / 864e5));
+const supplyLeft = (x) => Math.max(0, Number(x.stock) - Number(x.per_day) * daysSince(x.counted_on));
+const supplyDays = (x) => (Number(x.per_day) > 0 ? Math.floor(supplyLeft(x) / Number(x.per_day)) : Infinity);
+const lowSupplies = () => (state.supplies ?? []).filter((x) => supplyDays(x) <= (x.warn_days ?? 7));
+const UNITS = ["Kapseln", "Tabletten", "Tropfen", "ml", "g", "Portionen"];
+
+function openSupplySheet(x = {}) {
+  x = x ?? {};
+  const left = x.id ? supplyLeft(x) : "";
+  form.innerHTML = `<h3>${t(x.id ? "Vorrat bearbeiten" : "Supplement hinzufügen")}</h3>
+    <input name="name" placeholder="${t("Name, z. B. Magnesium")}" required value="${esc(x.name)}">
+    <div class="row">
+      <div><label>${t("Bestand jetzt")}</label><input name="stock" type="number" inputmode="decimal" min="0" step="any" required value="${x.id ? fmtNum(left).replace(",", ".") : ""}"></div>
+      <div><label>${t("Einheit")}</label><select name="unit">${UNITS.map((u) => `<option value="${u}" ${(x.unit ?? "Kapseln") === u ? "selected" : ""}>${t(u)}</option>`).join("")}</select></div>
+    </div>
+    <div class="row">
+      <div><label>${t("Pro Tag")}</label><input name="per_day" type="number" inputmode="decimal" min="0" step="any" required value="${x.per_day ?? 1}"></div>
+      <div><label>${t("Warnen ab (Tage)")}</label><input name="warn_days" type="number" inputmode="numeric" min="0" max="60" value="${x.warn_days ?? 7}"></div>
+    </div>
+    <div class="sheet-actions"><button class="primary" value="save">${t("Speichern")}</button></div>
+    ${x.id ? `<button type="button" class="ghost danger" id="del">${t("Löschen")}</button>` : ""}
+    <button type="button" class="ghost" id="cancel">${t("Abbrechen")}</button>`;
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const f = new FormData(form);
+    const row = { name: f.get("name").trim(), unit: f.get("unit"), stock: Number(String(f.get("stock")).replace(",", ".")), per_day: Number(String(f.get("per_day")).replace(",", ".")),
+      warn_days: Number(f.get("warn_days") || 7), counted_on: isoDate(new Date()) };
+    const { error } = x.id ? await db.from("supplies").update(row).eq("id", x.id) : await db.from("supplies").insert(row);
+    if (error) return toast(error.message);
+    closeSheet(sheet); refresh();
+  };
+  bindSheetButtons(async () => { await db.from("supplies").delete().eq("id", x.id); });
+  openSheet(sheet);
+}
+
+function openRefill(x) {
+  form.innerHTML = `<h3>${t("{x} auffüllen", { x: esc(x.name) })}</h3>
+    <p class="small muted">${t("Noch {n} {u}. Wie viele kommen dazu?", { n: fmtNum(supplyLeft(x)), u: esc(t(x.unit)) })}</p>
+    <div class="chips quick">${[30, 60, 90, 120, 180].map((n) => `<button type="button" class="chip" data-n="${n}">+${n}</button>`).join("")}</div>
+    <input name="amount" type="number" inputmode="decimal" min="0" step="any" placeholder="${t("Menge")}">
+    <div class="sheet-actions"><button class="primary" value="save">${t("Auffüllen")}</button></div>
+    <button type="button" class="ghost" id="cancel">${t("Abbrechen")}</button>`;
+  form.querySelectorAll("[data-n]").forEach((b) => (b.onclick = () => { form.amount.value = b.dataset.n; form.requestSubmit(); }));
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const n = Number(String(form.amount.value).replace(",", "."));
+    if (!n) return;
+    closeSheet(sheet);
+    await refillSupply(x, n, "add");
+  };
+  bindSheetButtons();
+  openSheet(sheet);
+}
+
+// "add": Menge dazu, "set": so viel ist jetzt da
+async function refillSupply(x, n, mode) {
+  const before = { stock: x.stock, counted_on: x.counted_on };
+  const stock = mode === "add" ? supplyLeft(x) + n : n;
+  const { error } = await db.from("supplies").update({ stock, counted_on: isoDate(new Date()) }).eq("id", x.id);
+  if (error) return toast(error.message);
+  toast(t("{x}: jetzt {n} {u}", { x: x.name, n: fmtNum(stock), u: t(x.unit) }), async () => { await db.from("supplies").update(before).eq("id", x.id); refresh(); });
+  refresh();
 }
 
 // ---------- Push-Mitteilungen ----------
@@ -452,10 +646,22 @@ async function setRoutineDone(id, on, date = isoDate(state.day)) {
   else await db.from("completions").delete().eq("routine_id", id).eq("on_date", date);
 }
 
+// Aufgabe abhaken; bei einer Serie gleich die nächste Folge anlegen bzw. beim Zurücknehmen wieder entfernen
+async function setItemDone(id, on) {
+  const raw = findEntry(id)?.raw ?? findEntry(id) ?? (state.upcoming ?? []).find((i) => i.id === id);
+  await db.from("items").update({ done: on }).eq("id", id);
+  if (raw) raw.done = on;
+  if (raw?.series_id && raw.repeat) {
+    if (on) await advanceSeries(true);
+    else await db.from("items").delete().eq("series_id", raw.series_id).eq("done", false).gt("on_date", raw.on_date);
+    state.upcoming = null;
+  }
+}
+
 const findEntry = (id) => [...state.entries, ...state.open].find((e) => e.id === id) ?? (state.termineCache ?? []).find((e) => e.id === id);
 
 document.addEventListener("click", async (ev) => {
-  const t = ev.target.closest("[data-toggle],[data-edit-item],[data-edit-routine],[data-day],[data-goto],[data-detail],#new-routine,#new-item");
+  const t = ev.target.closest("[data-toggle],[data-edit-item],[data-edit-routine],[data-day],[data-open-day],[data-goto],[data-detail],#new-routine,#new-item");
   if (!t) return;
   if (t.dataset.toggle) {
     const [kind, id] = t.dataset.toggle.split(":");
@@ -464,11 +670,11 @@ document.addEventListener("click", async (ev) => {
     t.innerHTML = on ? CHECK_SVG : "";
     if (navigator.vibrate) navigator.vibrate(10);
     if (kind === "routine") await setRoutineDone(id, on);
-    else await db.from("items").update({ done: on }).eq("id", id);
+    else await setItemDone(id, on);
     await refresh();
   } else if (t.dataset.detail) {
     const e = findEntry(t.dataset.detail);
-    if (e) openDetail(e.kind ? e : { ...e, raw: e });
+    if (e) openDetail(e.raw ? e : toEntry(e));
   } else if (t.dataset.editItem) {
     const e = findEntry(t.dataset.editItem);
     openItemSheet(e?.raw ?? e);
@@ -477,6 +683,9 @@ document.addEventListener("click", async (ev) => {
   } else if (t.dataset.day) {
     state.day = new Date(t.dataset.day + "T12:00");
     refresh();
+  } else if (t.dataset.openDay) {
+    state.day = new Date(t.dataset.openDay + "T12:00");
+    switchView("heute");
   } else if (t.dataset.goto) switchView(t.dataset.goto);
   else if (t.id === "new-routine") openRoutineSheet();
   else if (t.id === "new-item") openItemSheet();
@@ -550,6 +759,7 @@ function openDetail(e) {
     [t("Priorität"), t(e.priority === "hoch" ? "Hoch, erinnert bis erledigt" : "Normal")],
     remind ? [t("Erinnerung"), remind] : null,
     !isRoutine && raw.area ? [t("Bereich"), AREAS[raw.area] ?? esc(raw.area)] : null,
+    !isRoutine && raw.repeat ? [t("Wiederholung"), t(REPEATS[raw.repeat])] : null,
     raw.notes ? [t("Notiz"), esc(raw.notes).replace(/\n/g, "<br>")] : null,
   ].filter(Boolean);
   const cl = isRoutine ? [] : raw.checklist ?? [];
@@ -571,12 +781,12 @@ function openDetail(e) {
   }));
   $("#d-done").onclick = async () => {
     if (isRoutine) await setRoutineDone(e.id, !e.done);
-    else await db.from("items").update({ done: !e.done }).eq("id", e.id);
+    else await setItemDone(e.id, !e.done);
     closeSheet(sheet); refresh();
   };
   $("#d-edit").onclick = () => { sheet.close(); isRoutine ? openRoutineSheet(raw) : openItemSheet(raw); };
   const del = $("#d-del");
-  if (del) del.onclick = async () => { if (confirm(t("Wirklich löschen?"))) { await db.from("items").delete().eq("id", e.id); closeSheet(sheet); refresh(); } };
+  if (del) del.onclick = () => deleteEntry(e.kind, e.id, raw.id ? raw : undefined);
   openSheet(sheet);
 }
 
@@ -614,6 +824,8 @@ function openItemSheet(item = {}, preset = {}) {
       ${[["", t("Zur Uhrzeit")], [15, t("{n} Min. vorher", { n: 15 })], [30, t("{n} Min. vorher", { n: 30 })], [60, t("{n} Std. vorher", { n: 1 })], [120, t("{n} Std. vorher", { n: 2 })], [1440, t("1 Tag vorher")]]
         .map(([v, n]) => `<option value="${v}" ${String(it.remind_before ?? (it.kind === "termin" && !item.id ? 15 : "")) === String(v) ? "selected" : ""}>${n}</option>`).join("")}
     </select>
+    <label>${t("Wiederholung")}</label>
+    <select name="repeat"><option value="">${t("Einmalig")}</option>${Object.entries(REPEATS).map(([k, v]) => `<option value="${k}" ${it.repeat === k ? "selected" : ""}>${t(v)}</option>`).join("")}</select>
     ${prioSeg(it.priority)}
     <label>${t("Bereich")}</label>
     <select name="area"><option value="">${t("Kein Bereich")}</option>${Object.entries(AREAS).map(([k, v]) => `<option value="${k}" ${it.area === k ? "selected" : ""}>${v}</option>`).join("")}</select>
@@ -652,12 +864,15 @@ function openItemSheet(item = {}, preset = {}) {
     const row = { kind, title: f.get("title").trim(), on_date: f.get("on_date"), start_time: f.get("start_time") || null, end_time: f.get("end_time") || null, notes: f.get("notes").trim() || null,
       location: kind === "termin" ? f.get("location").trim() || null : null,
       remind_before: f.get("remind_before") ? Number(f.get("remind_before")) : null, priority: getPrio(),
-      area: f.get("area") || null, checklist: getChecklist() };
+      area: f.get("area") || null, checklist: getChecklist(), repeat: f.get("repeat") || null };
+    if (row.repeat) row.series_id = it.series_id ?? crypto.randomUUID();
     const { error } = item.id ? await db.from("items").update(row).eq("id", item.id) : await db.from("items").insert(row);
     if (error) return toast(error.message);
     closeSheet(sheet); refresh();
   };
-  bindSheetButtons(async () => { await db.from("items").delete().eq("id", item.id); });
+  const del = form.querySelector("#del");
+  if (del) del.onclick = () => deleteEntry(item.kind, item.id, item);
+  form.querySelector("#cancel").onclick = () => closeSheet(sheet);
   enhancePickers(form);
   openSheet(sheet);
 }
@@ -886,7 +1101,15 @@ function targets() {
   state.routines.forEach((r) => add({ kind: "routine", id: r.id, title: r.title, prayer: r.prayer, done: false, raw: r, priority: r.priority }));
   return out;
 }
-const intentOf = (text) => parseIntent(text, new Date(), targets(), LANG);
+const intentOf = (text) => parseIntent(text, new Date(), targets(), LANG, state.supplies ?? []);
+
+// Text ohne "jeden Monat" usw. parsen, die Wiederholung hängt sich an Termin oder Aufgabe
+function parseFull(text) {
+  const r = extractRepeat(text);
+  const cmd = parseCmd(r.text || text, new Date(), candidates());
+  if (r.repeat && (cmd.type === "termin" || cmd.type === "aufgabe")) cmd.repeat = r.repeat;
+  return cmd;
+}
 
 function describe(cmd) {
   const x = cmd.target ? cmd.target.title : "";
@@ -894,7 +1117,13 @@ function describe(cmd) {
   if (cmd.type === "sprache") return [t("Sprache"), cmd.lang === "tr" ? "Türkçe" : "Deutsch"];
   if (cmd.type === "theme") return [t("Darstellung"), t({ auto: "Automatisch", light: "Hell", dark: "Dunkel" }[cmd.theme])];
   if (cmd.type === "gruppe") return [t("Routinen"), t(cmd.g === "zeit" ? "Nach Tageszeit" : "Nach Bereich")];
-  if (cmd.type === "zeige") return [t("Anzeigen"), cmd.date ? fmtDay(cmd.date, { weekday: "long", day: "numeric", month: "long" }) : t({ heute: "Tag", termine: "Termine", plan: "Routinen", mehr: "Einstellungen" }[cmd.view])];
+  if (cmd.type === "zeige") return [t("Anzeigen"), cmd.date ? fmtDay(cmd.date, { weekday: "long", day: "numeric", month: "long" }) : t({ heute: "Tag", termine: "Termine", plan: "Routinen", mehr: "Einstellungen", monat: "Monat", verlauf: "Verlauf", vorrat: "Supplement-Vorrat" }[cmd.view])];
+  if (cmd.type === "suche") return [t("Suche"), cmd.q];
+  if (cmd.type === "vorrat") {
+    const name = cmd.supply?.name ?? cmd.name;
+    if (cmd.mode === "info") return [t("Vorrat"), name];
+    return [t(cmd.mode === "add" ? "Auffüllen" : "Bestand"), `${name} · ${cmd.mode === "add" ? "+" : ""}${fmtNum(cmd.amount)}${cmd.supply ? "" : " · " + t("neu")}`];
+  }
   if (cmd.type === "detail") return [t("Anzeigen"), x];
   if (cmd.type === "loeschen") return [t("Löschen"), x];
   if (cmd.type === "offen") return [t("Wieder öffnen"), x];
@@ -909,8 +1138,9 @@ function describe(cmd) {
     const d = describe({ ...cmd, title: extractPrio(cmd.title).title });
     return [d[0], d[1] + " · " + t("Wichtig")];
   }
-  if (cmd.type === "termin") return [t("Termin"), `${cmd.title} · ${fmtDay(cmd.date)}${cmd.time ? " · " + cmd.time : ""}${cmd.end ? "–" + cmd.end : ""}${cmd.location ? " · " + cmd.location : ""}`];
-  if (cmd.type === "aufgabe") return [t("Aufgabe"), `${cmd.title} · ${t("fällig {d}", { d: fmtDay(cmd.date) })}${cmd.time ? " · " + cmd.time : ""}`];
+  const rp = cmd.repeat ? ` · ↻ ${t(REPEATS[cmd.repeat])}` : "";
+  if (cmd.type === "termin") return [t("Termin"), `${cmd.title} · ${fmtDay(cmd.date)}${cmd.time ? " · " + cmd.time : ""}${cmd.end ? "–" + cmd.end : ""}${cmd.location ? " · " + cmd.location : ""}${rp}`];
+  if (cmd.type === "aufgabe") return [t("Aufgabe"), `${cmd.title} · ${t("fällig {d}", { d: fmtDay(cmd.date) })}${cmd.time ? " · " + cmd.time : ""}${rp}`];
   return null;
 }
 
@@ -918,7 +1148,7 @@ function showPreview() {
   const v = $("#cmd-input").value.trim();
   const p = $("#preview");
   if (!v) { p.hidden = true; return; }
-  const d = describe(intentOf(v) ?? parseCmd(v, new Date(), candidates()));
+  const d = describe(intentOf(v) ?? parseFull(v));
   p.hidden = !d;
   if (d) p.innerHTML = `<b>${d[0]}</b>${esc(d[1])}`;
 }
@@ -935,16 +1165,16 @@ async function runCommand(text) {
   if (!state.upcoming) await loadUpcoming();
   const intent = intentOf(text);
   if (intent) return runIntent(intent);
-  const cmd = parseCmd(text, new Date(), candidates());
+  const cmd = parseFull(text);
 
   if (cmd.type === "erledigt") {
     const e = cmd.match;
     const date = e.kind === "routine" ? isoDate(state.day) : null;
     if (e.kind === "routine") await setRoutineDone(e.id, true, date);
-    else await db.from("items").update({ done: true }).eq("id", e.id);
+    else await setItemDone(e.id, true);
     toast(t("Abgehakt: {x}", { x: e.title }), async () => {
       if (e.kind === "routine") await setRoutineDone(e.id, false, date);
-      else await db.from("items").update({ done: false }).eq("id", e.id);
+      else await setItemDone(e.id, false);
       refresh();
     });
   } else if (cmd.type === "routine") {
@@ -955,15 +1185,17 @@ async function runCommand(text) {
     // "… wichtig" macht den Eintrag gleich zu hoher Priorität
     const p = extractPrio(cmd.title);
     cmd.title = p.title;
-    const row = { kind: cmd.type, title: cmd.title, on_date: cmd.date, start_time: cmd.time, end_time: cmd.end, priority: p.priority ?? "normal", location: cmd.location ?? null };
+    const row = { kind: cmd.type, title: cmd.title, on_date: cmd.date, start_time: cmd.time, end_time: cmd.end, priority: p.priority ?? "normal", location: cmd.location ?? null,
+      repeat: cmd.repeat ?? null, series_id: cmd.repeat ? crypto.randomUUID() : null };
     const { data, error } = await db.from("items").insert(row).select().single();
     if (error) return toast(error.message);
-    toast(`${t(cmd.type === "termin" ? "Termin" : "Aufgabe")}: ${cmd.title}, ${fmtDay(cmd.date)}${cmd.time ? " " + cmd.time : ""}`, async () => {
+    toast(`${t(cmd.type === "termin" ? "Termin" : "Aufgabe")}: ${cmd.title}, ${fmtDay(cmd.date)}${cmd.time ? " " + cmd.time : ""}${cmd.repeat ? " ↻" : ""}`, async () => {
       await db.from("items").delete().eq("id", data.id);
       refresh();
     });
   } else {
-    openItemSheet({}, { title: text });
+    const r = extractRepeat(text);
+    openItemSheet({}, { title: r.text || text, repeat: r.repeat });
     return;
   }
   refresh();
@@ -996,19 +1228,30 @@ async function runIntent(c) {
       return toast(t(c.g === "zeit" ? "Routinen nach Tageszeit sortiert" : "Routinen nach Bereich sortiert"));
     case "zeige":
       if (c.date) state.day = new Date(c.date + "T12:00");
+      if (c.view === "monat" || c.view === "verlauf") { state.termMode = c.view === "monat" ? "monat" : "verlauf"; state.search = ""; return switchView("termine"); }
+      if (c.view === "vorrat") { switchView("mehr"); return setTimeout(() => $("#vorrat")?.scrollIntoView({ behavior: "smooth" }), 300); }
+      if (c.view === "termine") state.termMode = "liste";
       return switchView(c.view);
+    case "suche":
+      state.search = c.q;
+      return switchView("termine");
+    case "vorrat": {
+      let x = c.supply;
+      if (c.mode === "info") return toast(`${x.name}: ${fmtNum(supplyLeft(x))} ${t(x.unit)} · ${supplyDays(x) <= 0 ? t("leer") : t("reicht {n} Tage", { n: supplyDays(x) })}`);
+      if (!x) {
+        const { data, error } = await db.from("supplies").insert({ name: c.name, stock: 0, per_day: 1 }).select().single();
+        if (error) return toast(error.message);
+        x = data;
+      }
+      return refillSupply(x, c.amount, c.mode);
+    }
     case "detail": return openDetail(e);
     case "offen":
       if (e.kind === "routine") { await setRoutineDone(e.id, false); refresh(); return toast(t("Wieder offen: {x}", { x: e.title }), async () => { await setRoutineDone(e.id, true); refresh(); }); }
-      return update({ done: false }, t("Wieder offen: {x}", { x: e.title }));
-    case "loeschen": {
-      if (!confirm(t("{x} löschen?", { x: e.title }))) return;
-      const { error } = await db.from(table).delete().eq("id", e.id);
-      if (error) return toast(error.message);
-      state.upcoming = null;
-      toast(t("Gelöscht: {x}", { x: e.title }), async () => { await db.from(table).insert(raw); refresh(); });
-      return refresh();
-    }
+      await setItemDone(e.id, false); refresh();
+      return toast(t("Wieder offen: {x}", { x: e.title }), async () => { await setItemDone(e.id, true); refresh(); });
+    case "loeschen":
+      return deleteEntry(e.kind, e.id, e.kind === "routine" ? undefined : raw);
     case "verschieben": {
       if (e.kind === "routine") {
         if (!c.time) return toast(t("Für Routinen bitte eine Uhrzeit sagen."));
@@ -1085,33 +1328,93 @@ document.addEventListener("click", (e) => {
   if (el && (el === swOpen || Date.now() - (el._swiped ?? 0) < 400)) { e.stopPropagation(); e.preventDefault(); if (el === swOpen) closeSwipe(); }
 }, true);
 
-async function deleteEntry(kind, id) {
+async function deleteEntry(kind, id, given) {
   const isRoutine = kind === "routine";
-  const table = isRoutine ? "routines" : "items";
-  const raw = isRoutine ? state.routines.find((r) => r.id === id) : findEntry(id)?.raw ?? findEntry(id);
+  const raw = isRoutine ? state.routines.find((r) => r.id === id) : given ?? findEntry(id)?.raw ?? findEntry(id) ?? (state.upcoming ?? []).find((i) => i.id === id);
   if (!raw) return;
-  if (isRoutine && !confirm(t("Routine „{x}“ ganz löschen?", { x: raw.title }))) return;
-  const { error } = await db.from(table).delete().eq("id", id);
-  if (error) return toast(error.message);
+  if (isRoutine) {
+    if (!confirm(t("Routine „{x}“ ganz löschen?", { x: raw.title }))) return;
+    const { error } = await db.from("routines").delete().eq("id", id);
+    if (error) return toast(error.message);
+    if (sheet.open) closeSheet(sheet);
+    toast(t("Gelöscht: {x}", { x: raw.title }), async () => { await db.from("routines").insert(raw); refresh(); });
+    return refresh();
+  }
+  const undo = await removeItem(raw);
+  if (!undo) return;
+  if (sheet.open) closeSheet(sheet);
   state.upcoming = null;
-  toast(t("Gelöscht: {x}", { x: raw.title }), async () => { await db.from(table).insert(raw); refresh(); });
+  toast(t("Gelöscht: {x}", { x: raw.title }), async () => { await undo(); refresh(); });
   refresh();
+}
+
+// Nächstes Datum einer Serie ab heute
+function nextOf(raw) {
+  const today = isoDate(new Date());
+  const step = (k) => { const d = new Date(raw.on_date + "T12:00"), day = d.getDate();
+    if (raw.repeat === "taeglich") d.setDate(day + k);
+    else if (raw.repeat === "woechentlich") d.setDate(day + 7 * k);
+    else { d.setDate(1); d.setMonth(d.getMonth() + (raw.repeat === "monatlich" ? k : 12 * k)); d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate())); }
+    return isoDate(d); };
+  let k = 1, nd;
+  do nd = step(k++); while (nd < today && k < 5000);
+  const { id, created_at, done_at, ...rest } = raw;
+  return { ...rest, on_date: nd, done: false, checklist: (raw.checklist ?? []).map((c) => ({ ...c, d: false })) };
+}
+
+// Löscht einen Eintrag; bei Serien wird gefragt: nur diesen oder auch alle künftigen. Gibt eine Rückgängig-Funktion zurück.
+async function removeItem(raw) {
+  if (!raw.series_id || !raw.repeat) {
+    const { error } = await db.from("items").delete().eq("id", raw.id);
+    if (error) { toast(error.message); return null; }
+    return async () => { await db.from("items").insert(raw); };
+  }
+  const choice = await askSeries(raw);
+  if (!choice) return null;
+  const { data: rows } = await db.from("items").select("*").eq("series_id", raw.series_id);
+  if (choice === "one") {
+    let added = null;
+    if (!(rows ?? []).some((r) => r.on_date > raw.on_date)) ({ data: added } = await db.from("items").insert(nextOf(raw)).select().single());
+    await db.from("items").delete().eq("id", raw.id);
+    return async () => { if (added) await db.from("items").delete().eq("id", added.id); await db.from("items").insert(raw); };
+  }
+  const gone = (rows ?? []).filter((r) => r.id === raw.id || (!r.done && r.on_date >= raw.on_date));
+  for (const r of gone) await db.from("items").delete().eq("id", r.id);
+  await db.from("items").update({ repeat: null }).eq("series_id", raw.series_id);
+  return async () => { for (const r of gone) await db.from("items").insert(r); await db.from("items").update({ repeat: raw.repeat }).eq("series_id", raw.series_id); };
+}
+
+function askSeries(raw) {
+  return new Promise((resolve) => {
+    let answered = false;
+    form.innerHTML = `<h3>${t("Wiederkehrender Eintrag")}</h3>
+      <p class="small muted">${esc(raw.title)} · ${t(REPEATS[raw.repeat])}</p>
+      <button type="button" class="primary" data-a="one">${t("Nur diesen löschen")}</button>
+      <button type="button" class="ghost danger" data-a="all">${t("Diesen und alle künftigen")}</button>
+      <button type="button" class="ghost" data-a="">${t("Abbrechen")}</button>`;
+    form.onsubmit = (e) => e.preventDefault();
+    form.querySelectorAll("[data-a]").forEach((b) => (b.onclick = () => { answered = true; resolve(b.dataset.a || null); if (!b.dataset.a) closeSheet(sheet); }));
+    sheet.addEventListener("close", () => { if (!answered) resolve(null); }, { once: true });
+    openSheet(sheet);
+  });
 }
 
 // Hilfe: was die Sprachsteuerung versteht, mit Beispielen zum Antippen
 const HELP = {
   de: [
-    ["Anlegen", ["Termin am 20.10. um 14 Uhr Zahnarzt Ort Praxis Müller Neuwied", "Aufgabe Steuer bis Freitag, wichtig", "Täglich um 21 Uhr Buch lesen"]],
+    ["Anlegen", ["Termin am 20.10. um 14 Uhr Zahnarzt Ort Praxis Müller Neuwied", "Aufgabe Steuer bis Freitag, wichtig", "Täglich um 21 Uhr Buch lesen", "Jeden Monat Miete überweisen am 1.", "Termin jedes Jahr am 5. März Geburtstag Mama"]],
     ["Abhaken", ["Asr erledigt", "Asr doch nicht erledigt"]],
     ["Ändern", ["Verschiebe Zahnarzt auf Freitag um 10", "Mach Steuer wichtig", "Pausiere Retinol", "Erinnere mich 30 Minuten vorher an Zahnarzt", "Füge Milch zur Einkaufsliste hinzu", "Lösche den Termin Zahnarzt"]],
-    ["Anzeigen", ["Was steht morgen an", "Zeig mir die Termine", "Teile die Routinen nach Tageszeit auf", "Öffne die Einstellungen"]],
+    ["Anzeigen", ["Was steht morgen an", "Zeig mir die Termine", "Zeig den Monat", "Was habe ich erledigt", "Suche Zahnarzt", "Teile die Routinen nach Tageszeit auf", "Öffne die Einstellungen"]],
+    ["Vorrat", ["Magnesium aufgefüllt 60", "Noch 40 Ashwagandha", "Wie lange reicht Magnesium", "Zeig den Vorrat"]],
     ["Einstellungen", ["Sprich Türkisch", "Dunkler Modus", "Heller Modus"]],
   ],
   tr: [
-    ["Ekle", ["Yarın saat 15'te diş doktoru randevusu yer Müller muayenehanesi", "Vergi görevi cumaya kadar, önemli", "Her gün saat 21'de kitap oku"]],
+    ["Ekle", ["Yarın saat 15'te diş doktoru randevusu yer Müller muayenehanesi", "Vergi görevi cumaya kadar, önemli", "Her gün saat 21'de kitap oku", "Her ay ayın 1'inde kira öde"]],
     ["İşaretle", ["İkindiyi kıldım", "İkindiyi kılmadım"]],
     ["Değiştir", ["Diş doktorunu cumaya ertele", "Vergi önemli", "Retinol'ü durdur", "Diş doktoru için 1 saat önce hatırlat", "Alışveriş listesine süt ekle", "Diş doktoru randevusunu sil"]],
-    ["Göster", ["Yarın neler var", "Randevuları göster", "Rutinleri vakte göre sırala", "Ayarları aç"]],
+    ["Göster", ["Yarın neler var", "Randevuları göster", "Aylık görünüm", "Geçmişi göster", "Diş doktoru bul", "Rutinleri vakte göre sırala", "Ayarları aç"]],
+    ["Stok", ["Magnezyum doldurdum 60", "40 tane ashwagandha kaldı", "Magnezyum ne kadar yeter", "Stoku göster"]],
     ["Ayarlar", ["Almancaya geç", "Koyu mod", "Açık mod"]],
   ],
 };
@@ -1171,6 +1474,90 @@ function setTheme(p) {
 }
 darkMQ.addEventListener?.("change", applyTheme);
 applyTheme();
+
+// ---------- App-Sperre mit Face ID (WebAuthn, nur auf diesem Gerät) ----------
+const LOCK_KEY = "tagesplan-lock";
+const LOCK_AFTER = 60 * 1000;
+const lockId = () => { try { return localStorage.getItem(LOCK_KEY); } catch { return null; } };
+const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64u = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+const rand = (n) => crypto.getRandomValues(new Uint8Array(n));
+
+async function toggleLock() {
+  if (lockId()) {
+    try { localStorage.removeItem(LOCK_KEY); } catch {}
+    toast(t("App-Sperre aus"));
+    return renderMehr();
+  }
+  try {
+    if (!window.PublicKeyCredential || !(await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable())) return toast(t("Face ID ist hier nicht verfügbar."));
+    const cred = await navigator.credentials.create({ publicKey: {
+      rp: { name: "Tagesplan" }, challenge: rand(32),
+      user: { id: rand(16), name: state.user?.email ?? "tagesplan", displayName: "Tagesplan" },
+      pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
+      authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required", residentKey: "discouraged" },
+      timeout: 60000,
+    } });
+    localStorage.setItem(LOCK_KEY, b64u(cred.rawId));
+    toast(t("App-Sperre an"));
+  } catch (e) { toast(t("Face ID wurde nicht eingerichtet.")); }
+  renderMehr();
+}
+
+function showLock() {
+  if (!lockId() || $("#lock")) return;
+  document.documentElement.classList.add("locked");
+  const el = document.createElement("div");
+  el.id = "lock";
+  el.innerHTML = `<img src="ems-mark.png" alt="" width="64" height="64">
+    <h2>${t("Tagesplan ist gesperrt")}</h2>
+    <button class="primary" id="unlock">${t("Mit Face ID entsperren")}</button>
+    <button class="ghost" id="lock-reset">${t("Mit Passwort neu anmelden")}</button>`;
+  document.body.append(el);
+  $("#unlock").onclick = unlock;
+  $("#lock-reset").onclick = async () => {
+    try { localStorage.removeItem(LOCK_KEY); } catch {}
+    hideLock();
+    await db.auth.signOut();
+  };
+  unlock();
+}
+function hideLock() { $("#lock")?.remove(); document.documentElement.classList.remove("locked"); }
+let unlocking = false;
+async function unlock() {
+  if (unlocking) return;
+  unlocking = true;
+  try {
+    await navigator.credentials.get({ publicKey: {
+      challenge: rand(32), allowCredentials: [{ type: "public-key", id: unb64u(lockId()) }], userVerification: "required", timeout: 60000,
+    } });
+    hideLock();
+  } catch {} finally { unlocking = false; }
+}
+let hiddenAt = 0;
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) hiddenAt = Date.now();
+  else if (lockId() && Date.now() - hiddenAt > LOCK_AFTER) showLock();
+});
+showLock();
+
+// ---------- Daten exportieren ----------
+async function exportData() {
+  const names = ["routines", "items", "completions", "supplies", "settings"];
+  const res = await Promise.all(names.map((n) => db.from(n).select("*")));
+  const out = { exportiert: new Date().toISOString(), app_version: APP_VERSION };
+  names.forEach((n, i) => (out[n] = res[i].data ?? []));
+  for (const st of out.settings) delete st.calendar_token;
+  const name = `tagesplan-${isoDate(new Date())}.json`;
+  const file = new File([JSON.stringify(out, null, 2)], name, { type: "application/json" });
+  if (navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e.name === "AbortError") return; }
+  }
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(file), download: name });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  toast(t("Export gespeichert"));
+}
 
 // ---------- Neue Version ----------
 async function checkVersion() {

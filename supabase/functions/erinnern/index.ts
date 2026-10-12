@@ -15,10 +15,12 @@ const MAX_NAG = 5 * 60; // höchstens 5 Stunden lang nachhaken
 const TXT = {
   de: { testT: "Mitteilungen sind an", testB: "So erinnert dich dein Tagesplan.", prayer: (t: string) => `Gebet: ${t}`, prayerB: (t: string, at: string) => `Zeit für ${t} (${at})`,
     open: "Noch nicht abgehakt", termin: (t: string) => `Termin: ${t}`, at: (t: string) => `um ${t}`, still: "Noch offen", tomorrow: "Morgen",
-    tasks: (n: number, late: number) => `${n} offene ${n === 1 ? "Aufgabe" : "Aufgaben"}${late ? `, ${late} überfällig` : ""}`, nth: (n: number) => `${n}. Erinnerung` },
+    tasks: (n: number, late: number) => `${n} offene ${n === 1 ? "Aufgabe" : "Aufgaben"}${late ? `, ${late} überfällig` : ""}`, nth: (n: number) => `${n}. Erinnerung`,
+    supT: "Vorrat geht zur Neige", supB: (name: string, d: number) => d <= 0 ? `${name}: leer` : `${name}: noch ${d} ${d === 1 ? "Tag" : "Tage"}` },
   tr: { testT: "Bildirimler açık", testB: "Tagesplan sana böyle hatırlatır.", prayer: (t: string) => `Namaz: ${t}`, prayerB: (t: string, at: string) => `${t} vakti (${at})`,
     open: "Henüz işaretlenmedi", termin: (t: string) => `Randevu: ${t}`, at: (t: string) => `saat ${t}`, still: "Hâlâ açık", tomorrow: "Yarın",
-    tasks: (n: number, late: number) => `${n} açık görev${late ? `, ${late} gecikmiş` : ""}`, nth: (n: number) => `${n}. hatırlatma` },
+    tasks: (n: number, late: number) => `${n} açık görev${late ? `, ${late} gecikmiş` : ""}`, nth: (n: number) => `${n}. hatırlatma`,
+    supT: "Stok azalıyor", supB: (name: string, d: number) => d <= 0 ? `${name}: bitti` : `${name}: ${d} gün kaldı` },
 };
 const PRAYER_TR: Record<string, string> = { fajr: "Sabah", dhuhr: "Öğle", asr: "İkindi", maghrib: "Akşam", isha: "Yatsı" };
 
@@ -85,11 +87,12 @@ Deno.serve(async (req) => {
     const tomorrow = new Date(Date.parse(now.date) + 864e5).toISOString().slice(0, 10);
     const prayerMin = (p: string) => (pt ? toMin(String(pt[PRAYER_KEY[p]])) : null);
 
-    const [{ data: routines }, { data: done }, { data: items }, { data: logs }] = await Promise.all([
+    const [{ data: routines }, { data: done }, { data: items }, { data: logs }, { data: supplies }] = await Promise.all([
       db.from("routines").select("*").eq("user_id", uid).eq("active", true),
       db.from("completions").select("routine_id").eq("user_id", uid).eq("on_date", now.date),
       db.from("items").select("*").eq("user_id", uid).eq("done", false).lte("on_date", tomorrow),
       db.from("notify_log").select("*").eq("user_id", uid),
+      db.from("supplies").select("*").eq("user_id", uid),
     ]);
     const doneSet = new Set((done ?? []).map((d) => d.routine_id));
     const log = new Map((logs ?? []).map((l) => [l.key, l]));
@@ -132,6 +135,14 @@ Deno.serve(async (req) => {
           body: open.slice(0, 4).map((i) => i.title).join(" · "), at: slot, until: slot + 60, high: false });
       }
     }
+
+    // Vorrat: einmal am Tag um 10 Uhr, wenn etwas bald leer ist
+    const low = (supplies ?? []).map((x) => {
+      const days = Math.max(0, Math.round((Date.parse(now.date) - Date.parse(x.counted_on)) / 864e5));
+      const left = Math.max(0, Number(x.stock) - Number(x.per_day) * days);
+      return { name: x.name, d: Number(x.per_day) > 0 ? Math.floor(left / Number(x.per_day)) : Infinity, warn: x.warn_days ?? 7 };
+    }).filter((x) => x.d <= x.warn).sort((a, b) => a.d - b.d);
+    if (low.length) due.push({ key: `v:${now.date}`, title: tx.supT, body: low.slice(0, 4).map((x) => tx.supB(x.name, x.d)).join(" · "), at: 10 * 60, until: 11 * 60, high: false });
 
     // Senden, was jetzt dran ist
     const nag = settings.nag_minutes ?? 20;

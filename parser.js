@@ -50,6 +50,15 @@ function addDays(d, n) {
   return x;
 }
 
+export function nextMonthDay(base, day) {
+  for (let k = 0; k < 13; k++) {
+    const last = new Date(base.getFullYear(), base.getMonth() + k + 1, 0).getDate();
+    const d = new Date(base.getFullYear(), base.getMonth() + k, Math.min(day, last));
+    if (d >= base) return d;
+  }
+  return base;
+}
+
 export function parseDate(s, now) {
   const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   let m;
@@ -67,6 +76,10 @@ export function parseDate(s, now) {
     let d = new Date(base.getFullYear(), mon, Number(m[1]));
     if (d < base) d = new Date(base.getFullYear() + 1, mon, Number(m[1]));
     return { date: d, hit: m[0] };
+  }
+  // "am 1." / "zum 15." ohne Monat: nächster solcher Tag
+  if ((m = s.match(new RegExp(B + "(?:am|zum|bis\\s+zum)\\s+(\\d{1,2})\\.(?!\\s?\\d)", "iu"))) && +m[1] >= 1 && +m[1] <= 31) {
+    return { date: nextMonthDay(base, +m[1]), hit: m[0] };
   }
   if ((m = s.match(rx(`(?:am\\s+|nächsten\\s+|kommenden\\s+)?(${WEEKDAYS.join("|")})`)))) {
     let diff = (WEEKDAYS.indexOf(m[1].toLowerCase()) - base.getDay() + 7) % 7;

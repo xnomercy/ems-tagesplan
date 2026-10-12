@@ -264,7 +264,7 @@ dialog::before { content: ""; display: block; width: 40px; height: 5px; border-r
 
 /* Detailansicht */
 .detail-title { font-size: 24px !important; line-height: 1.25; margin-bottom: 14px !important; }
-.details { display: grid; grid-template-columns: 96px 1fr; gap: 10px 12px; margin: 0 0 8px; background: var(--card); border-radius: 14px; padding: 14px; }
+.details { display: grid; grid-template-columns: max-content 1fr; gap: 10px 12px; margin: 0 0 8px; background: var(--card); border-radius: 14px; padding: 14px; }
 .details dt { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; padding-top: 2px; }
 .details dd { margin: 0; overflow-wrap: anywhere; }
 .details a { color: var(--petrol); font-weight: 700; }
@@ -365,3 +365,36 @@ button.pick.empty { color: var(--muted); font-weight: 400; }
 .swipe-del { position: absolute; right: 0; width: 120px; z-index: 0; border: 0; border-radius: var(--radius);
   background: #E5252A; color: #fff; font: inherit; font-weight: 800; padding: 0 16px 0 0; text-align: right; }
 .list-item[data-swipe] { position: relative; }
+
+/* Suche, Monatsansicht, Verlauf */
+.search { margin-top: 14px; }
+.search input { width: 100%; min-height: 46px; border-radius: 14px; border: 1.5px solid var(--line); background: var(--card); color: var(--text); padding: 0 14px; font: inherit; font-size: 16px; }
+#term-seg { margin-top: 10px; }
+.cal.month button { aspect-ratio: auto; min-height: 50px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 6px 0 4px; gap: 4px; }
+.cal.month button b { font-size: 15px; }
+.cal.month .dots { display: flex; gap: 3px; min-height: 6px; }
+.cal.month .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--petrol); padding: 0; }
+.cal.month .dot.aufgabe { background: var(--tuerkis); }
+.cal.month .dot.prio { background: #E5252A; }
+.cal.month .dot.done { background: var(--done); opacity: .7; }
+.cal.month button.sel .dot { background: #fff; }
+.link-btn { border: 0; background: none; color: var(--petrol); font: inherit; font-weight: 700; font-size: 14px; padding: 0; }
+
+/* Vorrat */
+.sup-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--soft); }
+.sup-row:last-of-type { border-bottom: 0; }
+.sup-main { flex: 1; text-align: left; border: 0; background: none; color: var(--text); font: inherit; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.sup-main b { font-size: 16px; }
+.card .btn.sup-refill { display: inline-block; width: auto; margin: 0; color: var(--text); padding: 0 14px; min-height: 38px; }
+.warn-text { color: #E5252A; font-weight: 700; }
+.hint.warn { background: #FDECEC; color: #8A1518; }
+.hint.warn button { color: #E5252A; }
+:root[data-theme="dark"] .hint.warn { background: #3A1416; color: #FFD7D8; }
+:root[data-theme="dark"] .hint.warn button { color: #FF6B6F; }
+
+/* App-Sperre */
+.locked #app, .locked #login { visibility: hidden; }
+#lock { position: fixed; inset: 0; z-index: 1000; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; }
+#lock img { border-radius: 16px; }
+#lock h2 { margin: 6px 0 10px; font-size: 22px; }
+#lock .primary, #lock .ghost { max-width: 320px; width: 100%; }

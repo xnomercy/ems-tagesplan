@@ -1,6 +1,6 @@
 // Versteht einfache türkische Sprachbefehle, gleiche Ausgabe wie parser.js.
 // parseTr("Yarın saat 15'te diş doktoru randevusu", new Date(), kandidaten)
-import { isoDate, findMatch } from "./parser.js";
+import { isoDate, findMatch, nextMonthDay } from "./parser.js";
 
 const B = "(?<![\\p{L}\\d])";
 const E = "(?![\\p{L}\\d])";
@@ -57,6 +57,10 @@ function parseDate(s, now) {
     let d = new Date(base.getFullYear(), mon, Number(m[1]));
     if (d < base) d = new Date(base.getFullYear() + 1, mon, Number(m[1]));
     return { date: d, hit: m[0] };
+  }
+  // "ayın 1'inde", "her ayın 15'i"
+  if ((m = s.match(rx(`ayın\\s+(\\d{1,2})(?:'?\\.?\\p{L}*)?`))) && +m[1] >= 1 && +m[1] <= 31) {
+    return { date: nextMonthDay(base, +m[1]), hit: m[0] };
   }
   if ((m = s.match(rx(`(?:gelecek\\s+|haftaya\\s+|bu\\s+)?${DAY_RE}${SUF}`)))) {
     const wd = dayIndex(m[1]);

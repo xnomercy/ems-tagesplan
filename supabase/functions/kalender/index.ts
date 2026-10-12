@@ -59,9 +59,18 @@ Deno.serve(async (req) => {
     out.push(event(r.id, startDate, r.at_time, addMinutes(r.at_time, 15), r.title, r.notes, `FREQ=WEEKLY;BYDAY=${byday}`));
   }
 
+  // Serien: die jüngste Folge bekommt eine Wiederholungsregel, damit der Kalender auch die künftigen zeigt
+  const FREQ: Record<string, string> = { taeglich: "DAILY", woechentlich: "WEEKLY", monatlich: "MONTHLY", jaehrlich: "YEARLY" };
+  const latest = new Map<string, { id: string; on_date: string }>();
+  for (const i of items ?? []) {
+    if (!i.series_id || !i.repeat) continue;
+    const cur = latest.get(i.series_id);
+    if (!cur || i.on_date > cur.on_date) latest.set(i.series_id, i);
+  }
   for (const i of items ?? []) {
     const end = i.end_time ?? addMinutes(i.start_time, 60);
-    out.push(event(i.id, i.on_date, i.start_time, end, i.kind === "aufgabe" ? `Aufgabe: ${i.title}` : i.title, i.notes, undefined, i.location));
+    const rrule = i.series_id && latest.get(i.series_id)?.id === i.id && FREQ[i.repeat] ? `FREQ=${FREQ[i.repeat]}` : undefined;
+    out.push(event(i.id, i.on_date, i.start_time, end, i.kind === "aufgabe" ? `Aufgabe: ${i.title}` : i.title, i.notes, rrule, i.location));
   }
 
   // Gebete und an Gebete gekoppelte Routinen: Zeiten pro Tag für diesen und nächsten Monat

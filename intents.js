@@ -28,6 +28,9 @@ const RE = {
 };
 
 const VIEW_WORDS = [
+  ["monat", rx(`monat${W}|monatsansicht|kalenderansicht|bu ay${W}|ay görünüm${W}|aylık görünüm${W}|aylık takvim${W}`)],
+  ["verlauf", rx(`verlauf|ich\\s+erledigt|erledigte\\p{L}*|geschafft|historie|geçmiş${W}|tamamlanan${W}|yaptıklarım${W}`)],
+  ["vorrat", rx(`vorr(?:a|ä)t${W}|supplement${W}|stok${W}|takviye${W}`)],
   ["termine", rx(`termine|aufgaben|kalender|randevu${W}|görev${W}|takvim${W}`)],
   ["plan", rx(`routinen|rutin${W}`)],
   ["mehr", rx(`einstellung${W}|mehr|ayar${W}`)],
@@ -77,7 +80,7 @@ function dateTime(s, now, lang) {
 }
 const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-export function parseIntent(text, now = new Date(), targets = [], lang = "de") {
+export function parseIntent(text, now = new Date(), targets = [], lang = "de", supplies = []) {
   const s = text.replace(/İ/g, "i").replace(/[!?,.]/g, " ").replace(/\s+/g, " ").trim();
   if (!s) return null;
 
@@ -98,6 +101,13 @@ export function parseIntent(text, now = new Date(), targets = [], lang = "de") {
   }
 
   const isNew = RE.neu.test(s);
+
+  // Suche: "suche Zahnarzt", "finde Miete", "Zahnarzt ara", "Miete'yi bul"
+  const q = s.match(/^(?:such\p{L}*|find\p{L}*|wo ist|wo war)\s+(?:nach\s+)?(.+)$/iu) ?? s.match(/^(.+?)\s+(?:bul|arat|aramasını yap)$/iu) ?? s.match(/^(?:ara|bul)\s+(.+)$/iu);
+  if (q && !isNew) return { type: "suche", q: q[1].replace(/'\p{L}*$/u, "").trim() };
+
+  const sup = supplyIntent(s, supplies, lang);
+  if (sup) return sup;
 
   // Checkliste: "füge Milch zur Einkaufsliste hinzu" / "Alışveriş listesine süt ekle"
   let m = s.match(/(?:füg\p{L}*|setz\p{L}*|pack\p{L}*|schreib\p{L}*)\s+(.+?)\s+(?:zur|zum|zu|auf die|auf|in die|in)\s+(.+?)(?:\s+hinzu|\s+dazu|\s+drauf|\s+rein)?$/iu);
@@ -144,7 +154,8 @@ export function parseIntent(text, now = new Date(), targets = [], lang = "de") {
   }
 
   // Anzeigen: "zeig mir morgen", "was steht Freitag an", "öffne Einstellungen", "yarın neler var"
-  if (RE.zeige.test(s) && !isNew) {
+  const shortView = s.split(" ").length <= 3 && VIEW_WORDS.slice(0, 3).find(([, r]) => r.test(s));
+  if ((RE.zeige.test(s) || shortView) && !isNew) {
     const when = dateTime(s, now, lang);
     const view = VIEW_WORDS.find(([, r]) => r.test(s))?.[0];
     if (when.date) return { type: "zeige", view: "heute", date: when.date };
@@ -163,3 +174,58 @@ export function extractPrio(title) {
 }
 
 const cap = (x) => { const v = x.trim(); return v.charAt(0).toLocaleUpperCase() + v.slice(1); };
+
+// ---------- Wiederholung: "jeden Monat", "jährlich", "her ay", "her yıl" ----------
+const REPEAT_RE = [
+  ["monatlich", rx(`jeden\\s+monat${W}|jedes\\s+monat${W}|monatlich|einmal\\s+im\\s+monat|her\\s+ay${W}|aylık|ayda\\s+bir`)],
+  ["jaehrlich", rx(`jedes\\s+jahr|jährlich|einmal\\s+im\\s+jahr|her\\s+yıl${W}|her\\s+sene${W}|yıllık|yılda\\s+bir`)],
+  ["woechentlich", rx(`jede\\s+woche|wöchentlich|einmal\\s+die\\s+woche|her\\s+hafta${W}|haftalık|haftada\\s+bir`)],
+];
+// Gibt den Text ohne die Wiederholungswörter zurück; "täglich" bleibt, das sind Routinen
+export function extractRepeat(text) {
+  for (const [repeat, r] of REPEAT_RE) {
+    if (r.test(text)) return { text: text.replace(new RegExp(r.source, "giu"), " ").replace(/\s+/g, " ").trim(), repeat };
+  }
+  return { text, repeat: null };
+}
+
+// ---------- Vorrat: "Magnesium aufgefüllt 60", "noch 40 Magnesium", "wie lange reicht Magnesium" ----------
+const REFILL = rx(`aufgefüllt|auffüllen|nachgekauft|nachkaufen|gekauft|aufgestockt|geliefert|angekommen|neue?\\s+packung|doldur${W}|satın\\s+aldım|yeni\\s+aldım|geldi|stok${W}\\s+ekle`);
+const ALDIM = rx(`aldım`);
+const REST = rx(`noch|übrig|bestand|habe\\s+noch|hab\\s+noch|kaldı|var|elimde`);
+const ASK = rx(`wie\\s+lange|reicht|wie\\s+viel${W}|ne\\s+kadar|kaç\\s+gün|yeter${W}`);
+const UNIT = `kapsel${W}|tablette${W}|tabs|stück|tropfen|portion${W}|ml|g|gramm|tane|kapsül${W}|tablet|damla|adet`;
+const SUP_STRIP = rx([UNIT, "aufgefüllt", "auffüllen", "nachgekauft", "nachkaufen", "gekauft", "aufgestockt", "geliefert", "angekommen", "neue?", "packung", "noch", "übrig", "bestand",
+  "habe", "hab", "ich", "wie", "lange", "reicht", "viel\\p{L}*", "mein\\p{L}*", "vom", "von", "das", "die", "der", "den", "ist", "sind", "vorrat", "doldur\\p{L}*", "satın", "aldım", "yeni",
+  "geldi", "stok\\p{L}*", "ekle", "kaldı", "var", "elimde", "ne", "kadar", "kaç", "gün", "yeter\\p{L}*", "için", "mehr"].join("|"));
+
+function supplyName(s, amountHit) {
+  return (amountHit ? s.replace(amountHit, " ") : s).replace(new RegExp(SUP_STRIP.source, "giu"), " ").replace(/'\p{L}*/gu, "").replace(/\s+/g, " ").trim();
+}
+
+function supplyIntent(s, supplies, lang) {
+  // Menge: die Zahl vor einer Einheit, sonst die letzte Zahl ("Omega 3 nachgekauft 90" -> 90)
+  const nums = [...s.matchAll(/(\d+(?:[.,]\d+)?)(\s*(?:kapsel|tablette|tabs|stück|tropfen|portion|ml|g\b|gramm|tane|kapsül|tablet|damla|adet)\p{L}*)?/giu)];
+  const num = nums.find((x) => x[2]) ?? nums[nums.length - 1];
+  const n = num ? Number(num[1].replace(",", ".")) : null;
+  const pick = () => {
+    const name = supplyName(s, num?.[0]);
+    if (!name) return { name: "", supply: null };
+    const supply = findMatch(name, supplies.map((x) => ({ ...x, title: x.name }))) ?? null;
+    return { name: cap(name), supply };
+  };
+  const refill = REFILL.test(s) || (ALDIM.test(s) && n >= 5);
+  if (refill && n) {
+    const { name, supply } = pick();
+    if (supply || name) return { type: "vorrat", mode: "add", amount: n, supply, name };
+  }
+  if (n != null && REST.test(s) && !ASK.test(s)) {
+    const { name, supply } = pick();
+    if (supply) return { type: "vorrat", mode: "set", amount: n, supply, name };
+  }
+  if (ASK.test(s) || /vorr(?:a|ä)t|stok/iu.test(s)) {
+    const { supply } = pick();
+    if (supply) return { type: "vorrat", mode: "info", supply };
+  }
+  return null;
+}
