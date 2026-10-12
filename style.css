@@ -10,6 +10,10 @@
   --line: #E1EAE8;
   --soft: #E6F1F2;
   --ok: #1F7A8C;
+  --done: #1E9E5A;
+  --done-bg: #E9F7EF;
+  --done-line: #BFE6CF;
+  --done-text: #3C7356;
   --termin: #51B8C4;
   --danger: #C2410C;
   --shadow: 0 1px 2px rgba(11,61,74,.05), 0 6px 20px rgba(11,61,74,.06);
@@ -26,6 +30,10 @@
   --petrol: #2A93A7;
   --shadow: none;
   --danger: #F08A5D;
+  --done: #34C77B;
+  --done-bg: #0F3A2C;
+  --done-line: #1D5A43;
+  --done-text: #8FD3AE;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -122,8 +130,14 @@ main { padding: 8px 20px; max-width: 640px; margin: 0 auto; }
 .card-item .cat i { width: 6px; height: 6px; border-radius: 3px; background: var(--petrol); display: inline-block; }
 .card-item .title { font-weight: 700; overflow-wrap: anywhere; line-height: 1.3; margin-top: 1px; }
 .card-item .notes { font-size: 13px; color: var(--muted); margin-top: 2px; }
-.card-item.done .title { text-decoration: line-through; color: var(--muted); }
-.card-item.done { opacity: .75; }
+/* Erledigt: leicht grün, Haken und Texte passend */
+.card-item.done { background: var(--done-bg); box-shadow: inset 0 0 0 1px var(--done-line); }
+.card-item.done .title { text-decoration: line-through; text-decoration-color: var(--done); color: var(--done-text); }
+.card-item.done .cat, .card-item.done .notes { color: var(--done-text); opacity: .85; }
+.card-item.done .cat i { background: var(--done) !important; }
+.card-item.done .badge { background: var(--done-line); color: var(--done-text); }
+.card-item.done .check.on { background: var(--done); border-color: var(--done); }
+.slot:has(.card-item.done) .t { color: var(--done); }
 .card-item.termin .cat i { background: var(--tuerkis); }
 .card-item.aufgabe .cat i { background: #E0A43B; }
 .card-item.next { box-shadow: 0 0 0 2px var(--tuerkis), var(--shadow); }
