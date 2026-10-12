@@ -213,6 +213,7 @@ function renderDay() {
   const next = isToday ? timed.find((e) => !e.done && e.time >= nowT) : null;
 
   let html = `<section class="hero">
+    ${isToday ? "" : `<button class="to-today" data-day="${isoDate(new Date())}">Zu heute</button>`}
     <p class="eyebrow">${isToday ? "Dein Tag" : fmtDay(isoDate(state.day), { weekday: "long" })}</p>
     <h2>${total ? (done === total ? "Alles erledigt." : `${total - done} ${total - done === 1 ? "Punkt" : "Punkte"} offen`) : "Noch nichts geplant"}</h2>
     <div class="next">${next ? `Als Nächstes: ${esc(next.title)} um ${next.time}` : isToday && total && done < total ? "Für heute keine Uhrzeiten mehr offen." : ""}</div>
@@ -451,6 +452,13 @@ const sheet = $("#sheet"), form = $("#sheet-form");
 function openSheet(d) {
   d.classList.remove("closing");
   d.style.transform = "";
+  if (!d.querySelector(".sheet-x")) {
+    const x = document.createElement("button");
+    x.type = "button"; x.className = "sheet-x"; x.setAttribute("aria-label", "Schließen");
+    x.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>`;
+    x.onclick = () => { if (d.id === "voice") stopListening(); closeSheet(d); };
+    d.prepend(x);
+  }
   if (!d.open) d.showModal();
 }
 function closeSheet(d) {
@@ -546,7 +554,7 @@ function openItemSheet(item = {}, preset = {}) {
     ${item.id ? "" : `<div class="seg" id="kind-seg">
       <button type="button" data-k="aufgabe" class="${it.kind === "aufgabe" ? "on" : ""}">Aufgabe</button>
       <button type="button" data-k="termin" class="${it.kind === "termin" ? "on" : ""}">Termin</button>
-      <button type="button" data-k="routine">Täglich / Routine</button>
+      <button type="button" data-k="routine">Routine</button>
     </div>`}
     <input name="title" placeholder="Was?" required value="${esc(it.title)}">
     <label id="date-label">${it.kind === "aufgabe" ? "Fällig am" : "Datum"}</label><input name="on_date" type="date" required value="${it.on_date}">
@@ -565,7 +573,7 @@ function openItemSheet(item = {}, preset = {}) {
     <div id="cl-list"></div>
     <button type="button" class="ghost" id="cl-add" style="text-align:left;margin-top:0">+ Punkt hinzufügen</button>
     <label>Notiz</label><textarea name="notes" rows="2">${esc(it.notes)}</textarea>
-    <button class="primary" value="save">Speichern</button>
+    <div class="sheet-actions"><button class="primary" value="save">Speichern</button></div>
     ${item.id ? `<button type="button" class="ghost danger" id="del">Löschen</button>` : ""}
     <button type="button" class="ghost" id="cancel">Abbrechen</button>`;
   let kind = it.kind;
@@ -628,8 +636,8 @@ function openRoutineSheet(r = {}) {
     <label>Wiederholen an</label>
     <div class="seg" id="days-seg">${DAY_SHORT.map((d, i) => `<button type="button" data-d="${i + 1}" class="${days.includes(i + 1) ? "on" : ""}">${d}</button>`).join("")}</div>
     <label>Notiz</label><textarea name="notes" rows="2">${esc(rt.notes)}</textarea>
-    <label style="text-transform:none;letter-spacing:0;font-size:15px;color:var(--text)"><input type="checkbox" name="active" ${rt.active ? "checked" : ""} style="width:auto;min-height:0;margin-right:8px">aktiv</label>
-    <button class="primary" value="save">Speichern</button>
+    <label class="switch">Aktiv<input type="checkbox" name="active" ${rt.active ? "checked" : ""}></label>
+    <div class="sheet-actions"><button class="primary" value="save">Speichern</button></div>
     ${r.id ? `<button type="button" class="ghost danger" id="del">Löschen</button>` : ""}
     <button type="button" class="ghost" id="cancel">Abbrechen</button>`;
   const getPrio = bindPrio(rt.priority);
