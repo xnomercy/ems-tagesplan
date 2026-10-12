@@ -28,9 +28,8 @@
       <h1>Klarer Tag.<br>Alles im Griff.</h1>
       <form id="login-form">
         <input id="login-email" type="email" autocomplete="username" placeholder="E-Mail" required>
-        <input id="login-pass" type="password" autocomplete="current-password" placeholder="Passwort (mind. 10 Zeichen)" minlength="10" required>
+        <div class="pw"><input id="login-pass" type="password" autocomplete="current-password" placeholder="Passwort" required><button type="button" class="eye" data-eye aria-label="Passwort anzeigen"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
         <button type="submit" class="primary">Anmelden</button>
-        <button type="button" id="signup-btn" class="ghost">Erstes Mal? Konto erstellen</button>
       </form>
       <p id="login-msg" class="muted"></p>
     </div>

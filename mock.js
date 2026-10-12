@@ -59,5 +59,7 @@ export const db = {
     getSession: async () => ({ data: { session } }),
     onAuthStateChange: () => {},
     signOut: async () => location.reload(),
+    updateUser: async () => ({ data: {}, error: null }),
+    signInWithPassword: async () => ({ error: null }),
   },
 };

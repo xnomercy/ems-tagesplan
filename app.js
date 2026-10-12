@@ -69,14 +69,6 @@ $("#login-form").addEventListener("submit", async (e) => {
   $("#login-msg").textContent = error ? loginError(error) : "";
 });
 
-$("#signup-btn").addEventListener("click", async () => {
-  const email = $("#login-email").value.trim(), password = $("#login-pass").value;
-  if (!email || password.length < 10) { $("#login-msg").textContent = "E-Mail und ein Passwort mit mindestens 10 Zeichen eingeben."; return; }
-  const { data, error } = await db.auth.signUp({ email, password });
-  if (error) $("#login-msg").textContent = loginError(error);
-  else if (!data.session) $("#login-msg").textContent = "Fast fertig: Klick den Link in der Bestätigungsmail, dann hier anmelden.";
-});
-
 function loginError(err) {
   const m = err.message || "";
   if (/invalid login/i.test(m)) return "E-Mail oder Passwort stimmt nicht.";
@@ -286,7 +278,24 @@ function renderMehr() {
       <p class="eyebrow">Sprachbefehle</p>
       <p class="small">„Leg Aufgabe an Steuer, muss bis Freitag fertig sein“<br>„Täglich um 21 Uhr Buch lesen“<br>„Jeden Montag und Donnerstag 18 Uhr Training“<br>„Termin am 20.10. von 14 bis 16 Uhr Friseur“<br>„Asr erledigt“, „Magnesium genommen“</p>
     </div>
-    <div class="card"><p class="small muted">${esc(state.user?.email)}</p><button class="btn danger" id="logout">Abmelden</button></div>`;
+    <div class="card">
+      <p class="eyebrow">Passwort ändern</p>
+      <form id="pw-form">
+        <div class="pw"><input id="pw-new" type="password" autocomplete="new-password" placeholder="Neues Passwort (mind. 10 Zeichen)" minlength="10" required><button type="button" class="eye" data-eye aria-label="Passwort anzeigen"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
+        <div class="pw"><input id="pw-repeat" type="password" autocomplete="new-password" placeholder="Neues Passwort wiederholen" minlength="10" required><button type="button" class="eye" data-eye aria-label="Passwort anzeigen"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
+        <button class="btn fill">Passwort speichern</button>
+      </form>
+    </div>
+    <div class="card"><p class="small muted">Angemeldet als ${esc(state.user?.email)}</p><button class="btn danger" id="logout">Abmelden</button></div>`;
+  $("#pw-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const pw = $("#pw-new").value;
+    if (pw !== $("#pw-repeat").value) return toast("Die beiden Passwörter sind nicht gleich.");
+    const { error } = await db.auth.updateUser({ password: pw });
+    if (error) return toast(/different from the old/i.test(error.message) ? "Das ist schon dein aktuelles Passwort." : error.message);
+    e.target.reset();
+    toast("Passwort geändert");
+  };
   $("#set-loc").onclick = () => navigator.geolocation.getCurrentPosition(async (p) => {
     await saveSettings({ lat: +p.coords.latitude.toFixed(4), lng: +p.coords.longitude.toFixed(4) });
     toast("Standort gespeichert");
@@ -536,6 +545,17 @@ async function runCommand(text) {
   }
   refresh();
 }
+
+// Auge: Passwort ein- und ausblenden
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-eye]");
+  if (!b) return;
+  const input = b.parentElement.querySelector("input");
+  const show = input.type === "password";
+  input.type = show ? "text" : "password";
+  b.classList.toggle("on", show);
+  b.setAttribute("aria-label", show ? "Passwort verbergen" : "Passwort anzeigen");
+});
 
 // ---------- Hinweis ----------
 let toastTimer;

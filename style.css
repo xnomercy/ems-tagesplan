@@ -220,3 +220,11 @@ code.link { display: block; word-break: break-all; font-size: 12px; background: 
 }
 #toast span { flex: 1; }
 #toast button { flex: none;  border: 0; background: none; color: var(--tuerkis); font-weight: 800; }
+
+/* Passwortfeld mit Auge */
+.pw { position: relative; }
+.pw input { padding-right: 52px; }
+.eye { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; border: 0; background: none; color: var(--muted); display: grid; place-items: center; }
+.eye.on { color: var(--petrol); }
+.eye.on svg { stroke-width: 2.4; }
+#pw-form .btn { margin-top: 8px; }
