@@ -1,5 +1,5 @@
 // Hält die App-Dateien offline bereit. Daten kommen immer frisch von Supabase.
-const CACHE = "tagesplan-v3";
+const CACHE = "tagesplan-v4";
 const SHELL = ["./", "index.html", "style.css", "app.js", "parser.js", "manifest.webmanifest", "icon-192.png", "ems-logo.png", "ems-mark.png"];
 
 self.addEventListener("install", (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())));
@@ -15,4 +15,26 @@ self.addEventListener("fetch", (e) => {
     caches.open(CACHE).then((c) => c.put(e.request, copy));
     return res;
   }).catch(() => caches.match(e.request)));
+});
+
+// Push-Mitteilungen vom Server
+self.addEventListener("push", (e) => {
+  let d = {};
+  try { d = e.data.json(); } catch { d = { title: "Tagesplan", body: e.data?.text() }; }
+  e.waitUntil(self.registration.showNotification(d.title || "Tagesplan", {
+    body: d.body || "",
+    tag: d.tag,
+    renotify: true,
+    requireInteraction: !!d.high,
+    icon: "icon-192.png",
+    badge: "icon-192.png",
+    data: { url: d.url || "./" },
+  }));
+});
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+    for (const c of list) if ("focus" in c) return c.focus();
+    return self.clients.openWindow(e.notification.data?.url || "./");
+  }));
 });

@@ -3,9 +3,9 @@ const uid = "demo-user";
 const id = () => Math.random().toString(36).slice(2);
 const tables = { settings: [], routines: [], items: [], completions: [] };
 const defaults = {
-  settings: () => ({ user_id: uid, lat: null, lng: null, prayer_method: 13, calendar_token: "demo" }),
-  routines: () => ({ id: id(), user_id: uid, category: "sonstiges", prayer: null, at_time: null, anchor_prayer: null, anchor_offset: 15, days: [1, 2, 3, 4, 5, 6, 7], notes: null, active: true }),
-  items: () => ({ id: id(), user_id: uid, kind: "aufgabe", on_date: new Date().toISOString().slice(0, 10), start_time: null, end_time: null, notes: null, done: false }),
+  settings: () => ({ user_id: uid, lat: null, lng: null, prayer_method: 13, calendar_token: "demo", nag_minutes: 20 }),
+  routines: () => ({ id: id(), user_id: uid, category: "sonstiges", prayer: null, at_time: null, anchor_prayer: null, anchor_offset: 15, priority: "normal", days: [1, 2, 3, 4, 5, 6, 7], notes: null, active: true }),
+  items: () => ({ id: id(), user_id: uid, kind: "aufgabe", priority: "normal", location: null, remind_before: null, checklist: [], area: null, on_date: new Date().toISOString().slice(0, 10), start_time: null, end_time: null, notes: null, done: false }),
   completions: () => ({ user_id: uid }),
 };
 

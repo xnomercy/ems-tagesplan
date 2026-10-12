@@ -15,6 +15,8 @@ const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); r
 const fmtDay = (iso, opts = { weekday: "short", day: "numeric", month: "short" }) => new Date(iso + "T00:00").toLocaleDateString("de-DE", opts);
 const DAY_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const CATEGORIES = { gebet: "Gebet", lesen: "Lesen", training: "Training", supps: "Supplements", pflege: "Pflege", essen: "Essen", sonstiges: "Sonstiges" };
+const AREAS = { arbeit: "Arbeit", privat: "Privat", gesundheit: "Gesundheit", familie: "Familie", finanzen: "Finanzen", haushalt: "Haushalt" };
+const VAPID_PUBLIC = "BNV7U2HOxe9fvDt3Ni1eyeGrlVFLT5stsCgcKnU3pF9Ajqu5OWhv0b6qoLrtdcpFtH3J_3gK9CMu4uFbiAbKCk8";
 const PRAYER_API = { fajr: "Fajr", dhuhr: "Dhuhr", asr: "Asr", maghrib: "Maghrib", isha: "Isha" };
 const CHECK_SVG = '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
 
@@ -131,15 +133,15 @@ async function refresh() {
   for (const rt of state.routines) {
     if (!rt.active || !rt.days.includes(wd)) continue;
     const time = routineTime(rt, pt);
-    entries.push({ kind: "routine", id: rt.id, title: rt.title, time, done: done.has(rt.id), category: rt.category, notes: rt.notes, prayer: rt.prayer });
+    entries.push({ kind: "routine", id: rt.id, title: rt.title, time, done: done.has(rt.id), category: rt.category, notes: rt.notes, prayer: rt.prayer, priority: rt.priority, raw: rt });
   }
   for (const it of i.data ?? []) {
-    entries.push({ kind: it.kind, id: it.id, title: it.title, time: hhmm(it.start_time) || null, end: hhmm(it.end_time), done: it.done, notes: it.notes, raw: it, on_date: it.on_date });
+    entries.push({ kind: it.kind, id: it.id, title: it.title, time: hhmm(it.start_time) || null, end: hhmm(it.end_time), done: it.done, notes: it.notes, raw: it, on_date: it.on_date, priority: it.priority, location: it.location });
   }
   entries.sort((a, b) => (a.time ?? "99").localeCompare(b.time ?? "99"));
   state.entries = entries;
   state.open = day === today
-    ? (open.data ?? []).filter((x) => x.on_date !== day).map((it) => ({ kind: "aufgabe", id: it.id, title: it.title, time: hhmm(it.start_time) || null, done: false, notes: it.notes, raw: it, on_date: it.on_date }))
+    ? (open.data ?? []).filter((x) => x.on_date !== day).map((it) => ({ kind: "aufgabe", id: it.id, title: it.title, time: hhmm(it.start_time) || null, done: false, notes: it.notes, raw: it, on_date: it.on_date, priority: it.priority, location: it.location }))
     : [];
   render();
 }
@@ -173,14 +175,18 @@ function itemHtml(e, { next = false, showTime = false } = {}) {
   if (e.kind === "aufgabe" && e.on_date && e.on_date !== isoDate(state.day)) {
     badge = e.on_date < today ? `<span class="badge late">überfällig</span>` : `<span class="badge">bis ${fmtDay(e.on_date, { weekday: "short" })}</span>`;
   }
+  if (e.priority === "hoch") badge += `<span class="badge prio">Wichtig</span>`;
+  const cl = e.raw?.checklist ?? [];
+  if (e.kind !== "routine" && cl.length) badge += `<span class="badge">${cl.filter((c) => c.d).length}/${cl.length}</span>`;
+  const areaLabel = e.kind !== "routine" && e.raw?.area ? " · " + (AREAS[e.raw.area] ?? e.raw.area) : "";
   const end = e.end ? ` bis ${e.end}` : "";
-  return `<div class="card-item ${e.kind} ${e.done ? "done" : ""} ${next ? "next" : ""}">
+  return `<div class="card-item ${e.kind} ${e.done ? "done" : ""} ${next ? "next" : ""}" data-detail="${e.id}" role="button" tabindex="0">
     <div class="body">
-      <div class="cat"><i></i>${label}${showTime && e.time ? " · " + e.time : ""}${end} ${badge}</div>
+      <div class="cat"><i></i>${label}${areaLabel}${showTime && e.time ? " · " + e.time : ""}${end} ${badge}</div>
       <div class="title">${esc(e.title)}</div>
-      ${e.notes ? `<div class="notes">${esc(e.notes)}</div>` : ""}
+      ${e.location ? `<div class="notes">${esc(e.location)}</div>` : ""}
+      ${e.notes ? `<div class="notes clamp">${esc(e.notes)}</div>` : ""}
     </div>
-    ${e.kind !== "routine" ? `<button class="more" data-edit-item="${e.id}" aria-label="Bearbeiten">⋯</button>` : ""}
     <button class="check ${e.done ? "on" : ""}" data-toggle="${e.kind}:${e.id}" aria-label="${e.done ? "Nicht erledigt" : "Erledigt"}">${e.done ? CHECK_SVG : ""}</button>
   </div>`;
 }
@@ -255,11 +261,16 @@ function renderPlan() {
 
 async function renderTermine() {
   const { data } = await db.from("items").select("*").gte("on_date", isoDate(new Date())).order("on_date").order("start_time", { nullsFirst: false });
-  const termine = (data ?? []).filter((i) => i.kind === "termin");
-  const aufgaben = (data ?? []).filter((i) => i.kind === "aufgabe" && !i.done);
+  const f = state.areaFilter ?? "";
+  const shown = (data ?? []).filter((i) => !f || i.area === f);
+  const termine = shown.filter((i) => i.kind === "termin");
+  const aufgaben = shown.filter((i) => i.kind === "aufgabe" && !i.done);
   state.termineCache = data ?? [];
-  const toEntry = (i) => ({ kind: i.kind, id: i.id, title: i.title, time: hhmm(i.start_time) || null, end: hhmm(i.end_time), done: i.done, notes: i.notes, raw: i });
-  let html = `<div class="section-head"><h3>Kommende Termine</h3></div>`;
+  const toEntry = (i) => ({ kind: i.kind, id: i.id, title: i.title, time: hhmm(i.start_time) || null, end: hhmm(i.end_time), done: i.done, notes: i.notes, raw: i, on_date: i.on_date, priority: i.priority, location: i.location });
+  const used = [...new Set((data ?? []).map((i) => i.area).filter(Boolean))];
+  let html = used.length ? `<div class="chips">${[["", "Alle"], ...used.map((a) => [a, AREAS[a] ?? a])]
+    .map(([v, n]) => `<button class="chip ${f === v ? "on" : ""}" data-area="${v}">${n}</button>`).join("")}</div>` : "";
+  html += `<div class="section-head"><h3>Kommende Termine</h3></div>`;
   if (!termine.length) html += `<div class="empty">Keine Termine.</div>`;
   let last = "";
   for (const t of termine) {
@@ -270,6 +281,7 @@ async function renderTermine() {
   html += aufgaben.length ? aufgaben.map((a) => `<div class="slot"><div class="t small">${fmtDay(a.on_date, { day: "numeric", month: "numeric" })}</div>${itemHtml(toEntry(a), { showTime: true })}</div>`).join("") : `<div class="empty">Keine offenen Aufgaben.</div>`;
   html += `<button class="primary" id="new-item">Termin oder Aufgabe anlegen</button>`;
   $("#view-termine").innerHTML = html;
+  $("#view-termine").querySelectorAll("[data-area]").forEach((b) => (b.onclick = () => { state.areaFilter = b.dataset.area; renderTermine(); }));
 }
 
 function renderMehr() {
@@ -277,6 +289,15 @@ function renderMehr() {
   const feed = `${SUPABASE_URL}/functions/v1/kalender?token=${s.calendar_token}`;
   $("#view-mehr").innerHTML = `
     <div class="section-head"><h3>Einstellungen</h3></div>
+    <div class="card">
+      <p class="eyebrow">Mitteilungen</p>
+      <p id="push-state" class="small">Prüfe …</p>
+      <button class="btn fill" id="push-on">Mitteilungen einschalten</button>
+      <button class="btn" id="push-test">Test senden</button>
+      <label class="small muted" style="display:block;margin-top:12px">Wichtiges erneut melden alle</label>
+      <form><select id="nag">${[10, 15, 20, 30, 45, 60].map((m) => `<option value="${m}" ${(s.nag_minutes ?? 20) === m ? "selected" : ""}>${m} Minuten</option>`).join("")}</select></form>
+      <p class="small muted">Gebete erinnern bis zum nächsten Gebet, Wichtiges bis du es abhakst (höchstens 5 Std., nachts ab 23:30 ist Ruhe).</p>
+    </div>
     <div class="card">
       <p class="eyebrow">Gebetszeiten</p>
       <p>${s.lat != null ? `Standort gesetzt (${s.lat.toFixed(2)}, ${s.lng.toFixed(2)}).` : "Noch kein Standort gesetzt."}</p>
@@ -296,10 +317,6 @@ function renderMehr() {
       <code class="link">${esc(feed)}</code>
       <button class="btn fill" id="open-feed">Im Kalender öffnen</button>
       <button class="btn" id="copy-feed">Link kopieren</button>
-    </div>
-    <div class="card">
-      <p class="eyebrow">Sprachbefehle</p>
-      <p class="small">„Leg Aufgabe an Steuer, muss bis Freitag fertig sein“<br>„Täglich um 21 Uhr Buch lesen“<br>„Jeden Montag und Donnerstag 18 Uhr Training“<br>„Termin am 20.10. von 14 bis 16 Uhr Friseur“<br>„Asr erledigt“, „Magnesium genommen“</p>
     </div>
     <div class="card">
       <p class="eyebrow">Passwort ändern</p>
@@ -323,10 +340,54 @@ function renderMehr() {
     await saveSettings({ lat: +p.coords.latitude.toFixed(4), lng: +p.coords.longitude.toFixed(4) });
     toast("Standort gespeichert");
   }, () => toast("Standort nicht freigegeben"));
+  $("#nag").onchange = (e) => saveSettings({ nag_minutes: Number(e.target.value) });
+  $("#push-on").onclick = enablePush;
+  $("#push-test").onclick = sendTestPush;
+  updatePushState();
   $("#method").onchange = (e) => saveSettings({ prayer_method: Number(e.target.value) });
   $("#copy-feed").onclick = () => navigator.clipboard.writeText(feed).then(() => toast("Link kopiert"));
   $("#open-feed").onclick = () => { location.href = feed.replace(/^https:/, "webcal:"); };
   $("#logout").onclick = () => db.auth.signOut();
+}
+
+// ---------- Push-Mitteilungen ----------
+const standalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent);
+
+async function updatePushState() {
+  const el = $("#push-state");
+  if (!el) return;
+  if (isIOS() && !standalone()) { el.textContent = "Auf dem iPhone gehen Mitteilungen nur, wenn die App über Teilen › „Zum Home-Bildschirm“ installiert ist und von dort geöffnet wird."; return; }
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) { el.textContent = "Dieser Browser kann keine Mitteilungen."; return; }
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  el.textContent = Notification.permission === "denied" ? "Mitteilungen sind blockiert. Bitte in den Einstellungen des Handys für Tagesplan erlauben."
+    : sub ? "Mitteilungen sind an für dieses Gerät." : "Mitteilungen sind aus.";
+  $("#push-on").textContent = sub ? "Neu verbinden" : "Mitteilungen einschalten";
+}
+
+async function enablePush() {
+  try {
+    if (Notification.permission !== "granted" && (await Notification.requestPermission()) !== "granted") return updatePushState();
+    const reg = await navigator.serviceWorker.ready;
+    const key = Uint8Array.from(atob(VAPID_PUBLIC.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+    const sub = (await reg.pushManager.getSubscription()) ?? (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key }));
+    const j = sub.toJSON();
+    const { error } = await db.from("push_subscriptions").upsert({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth });
+    if (error) throw error;
+    toast("Mitteilungen sind an");
+    sendTestPush();
+  } catch (e) { toast("Mitteilungen gingen nicht an: " + (e.message ?? e)); }
+  updatePushState();
+}
+
+async function sendTestPush() {
+  const { data } = await db.auth.getSession();
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/erinnern?test=1`, {
+    method: "POST", headers: { Authorization: `Bearer ${data.session?.access_token}`, apikey: SUPABASE_KEY },
+  }).catch(() => null);
+  const ok = res && res.ok ? (await res.json()).ok : 0;
+  toast(ok ? "Testmitteilung geschickt" : "Kein Gerät verbunden. Erst Mitteilungen einschalten.");
 }
 
 async function saveSettings(patch) {
@@ -345,7 +406,7 @@ async function setRoutineDone(id, on, date = isoDate(state.day)) {
 const findEntry = (id) => [...state.entries, ...state.open].find((e) => e.id === id) ?? (state.termineCache ?? []).find((e) => e.id === id);
 
 document.addEventListener("click", async (ev) => {
-  const t = ev.target.closest("[data-toggle],[data-edit-item],[data-edit-routine],[data-day],[data-goto],#new-routine,#new-item");
+  const t = ev.target.closest("[data-toggle],[data-edit-item],[data-edit-routine],[data-day],[data-goto],[data-detail],#new-routine,#new-item");
   if (!t) return;
   if (t.dataset.toggle) {
     const [kind, id] = t.dataset.toggle.split(":");
@@ -356,6 +417,9 @@ document.addEventListener("click", async (ev) => {
     if (kind === "routine") await setRoutineDone(id, on);
     else await db.from("items").update({ done: on }).eq("id", id);
     await refresh();
+  } else if (t.dataset.detail) {
+    const e = findEntry(t.dataset.detail);
+    if (e) openDetail(e.kind ? e : { ...e, raw: e });
   } else if (t.dataset.editItem) {
     const e = findEntry(t.dataset.editItem);
     openItemSheet(e?.raw ?? e);
@@ -381,8 +445,99 @@ function switchView(v) {
   refresh();
 }
 
-// ---------- Formulare ----------
+// ---------- Blätter: hochfahren, runterwischen ----------
 const sheet = $("#sheet"), form = $("#sheet-form");
+
+function openSheet(d) {
+  d.classList.remove("closing");
+  d.style.transform = "";
+  if (!d.open) d.showModal();
+}
+function closeSheet(d) {
+  if (!d.open || d.classList.contains("closing")) return;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { d.close(); return; }
+  d.classList.add("closing");
+  setTimeout(() => { d.classList.remove("closing"); d.style.transform = ""; d.close(); }, 220);
+}
+for (const d of [sheet, $("#voice")]) {
+  // Tipp neben das Blatt schließt es
+  d.addEventListener("click", (e) => { if (e.target === d) { if (d.id === "voice") stopListening(); closeSheet(d); } });
+  d.addEventListener("cancel", (e) => { e.preventDefault(); closeSheet(d); });
+  // Nach unten wischen schließt es
+  let y0 = null, dy = 0;
+  d.addEventListener("touchstart", (e) => { y0 = d.scrollTop <= 0 && e.target.closest("input,textarea,select") == null ? e.touches[0].clientY : null; dy = 0; }, { passive: true });
+  d.addEventListener("touchmove", (e) => {
+    if (y0 == null) return;
+    dy = Math.max(0, e.touches[0].clientY - y0);
+    d.style.transition = "none";
+    d.style.transform = `translateY(${dy}px)`;
+  }, { passive: true });
+  d.addEventListener("touchend", () => {
+    if (y0 == null) return;
+    d.style.transition = "";
+    if (dy > 110) { if (d.id === "voice") stopListening(); closeSheet(d); } else d.style.transform = "";
+    y0 = null;
+  });
+}
+
+function openDetail(e) {
+  const raw = e.raw ?? {};
+  const isRoutine = e.kind === "routine";
+  const kindLabel = e.kind === "termin" ? "Termin" : e.kind === "aufgabe" ? "Aufgabe" : CATEGORIES[e.category] ?? "Routine";
+  const when = isRoutine
+    ? `${raw.days?.length === 7 ? "Täglich" : (raw.days ?? []).map((d) => DAY_SHORT[d - 1]).join(", ")}${e.time ? " · " + e.time : ""}${raw.anchor_prayer ? ` (${PRAYER_NAMES[raw.anchor_prayer]} +${raw.anchor_offset})` : raw.prayer ? " (Gebetszeit)" : ""}`
+    : `${fmtDay(raw.on_date, { weekday: "long", day: "numeric", month: "long" })}${raw.start_time ? " · " + hhmm(raw.start_time) : ""}${raw.end_time ? "–" + hhmm(raw.end_time) : ""}`;
+  const remind = raw.remind_before ? `${raw.remind_before >= 60 ? raw.remind_before / 60 + " Std." : raw.remind_before + " Min."} vorher` : null;
+  const rows = [
+    [e.kind === "aufgabe" ? "Fällig" : "Wann", when],
+    raw.location ? ["Ort", `<a href="https://maps.apple.com/?q=${encodeURIComponent(raw.location)}" target="_blank" rel="noopener">${esc(raw.location)}</a>`] : null,
+    ["Priorität", e.priority === "hoch" ? "Hoch, erinnert bis erledigt" : "Normal"],
+    remind ? ["Erinnerung", remind] : null,
+    !isRoutine && raw.area ? ["Bereich", AREAS[raw.area] ?? esc(raw.area)] : null,
+    raw.notes ? ["Notiz", esc(raw.notes).replace(/\n/g, "<br>")] : null,
+  ].filter(Boolean);
+  const cl = isRoutine ? [] : raw.checklist ?? [];
+  form.innerHTML = `<p class="eyebrow">${kindLabel}</p>
+    <h3 class="detail-title">${esc(e.title)}</h3>
+    <dl class="details">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
+    ${cl.length ? `<p class="eyebrow" style="margin-top:14px">Checkliste</p><div class="checklist">${cl.map((c, i) =>
+      `<label class="cl-item"><input type="checkbox" data-cl="${i}" ${c.d ? "checked" : ""}><span>${esc(c.t)}</span></label>`).join("")}</div>` : ""}
+    <button type="button" class="primary" id="d-done">${e.done ? "Wieder öffnen" : "Erledigt"}</button>
+    <div class="row">
+      <button type="button" class="ghost" id="d-edit">Bearbeiten</button>
+      ${isRoutine ? "" : `<button type="button" class="ghost danger" id="d-del">Löschen</button>`}
+    </div>`;
+  form.onsubmit = (ev) => ev.preventDefault();
+  form.querySelectorAll("[data-cl]").forEach((box) => (box.onchange = async () => {
+    cl[Number(box.dataset.cl)].d = box.checked;
+    await db.from("items").update({ checklist: cl }).eq("id", e.id);
+    refresh();
+  }));
+  $("#d-done").onclick = async () => {
+    if (isRoutine) await setRoutineDone(e.id, !e.done);
+    else await db.from("items").update({ done: !e.done }).eq("id", e.id);
+    closeSheet(sheet); refresh();
+  };
+  $("#d-edit").onclick = () => { sheet.close(); isRoutine ? openRoutineSheet(raw) : openItemSheet(raw); };
+  const del = $("#d-del");
+  if (del) del.onclick = async () => { if (confirm("Wirklich löschen?")) { await db.from("items").delete().eq("id", e.id); closeSheet(sheet); refresh(); } };
+  openSheet(sheet);
+}
+
+// ---------- Formulare ----------
+const prioSeg = (p) => `<label>Priorität</label>
+    <div class="seg" id="prio-seg">
+      <button type="button" data-p="normal" class="${p !== "hoch" ? "on" : ""}">Normal</button>
+      <button type="button" data-p="hoch" class="${p === "hoch" ? "on" : ""}">Hoch (nervt)</button>
+    </div>`;
+function bindPrio(initial) {
+  let prio = initial === "hoch" ? "hoch" : "normal";
+  form.querySelectorAll("#prio-seg button").forEach((b) => (b.onclick = () => {
+    prio = b.dataset.p;
+    form.querySelectorAll("#prio-seg button").forEach((x) => x.classList.toggle("on", x === b));
+  }));
+  return () => prio;
+}
 
 function openItemSheet(item = {}, preset = {}) {
   item = item ?? {};
@@ -397,27 +552,57 @@ function openItemSheet(item = {}, preset = {}) {
     <label id="date-label">${it.kind === "aufgabe" ? "Fällig am" : "Datum"}</label><input name="on_date" type="date" required value="${it.on_date}">
     <div class="row"><div><label>Von</label><input name="start_time" type="time" value="${hhmm(it.start_time)}"></div>
     <div><label>Bis</label><input name="end_time" type="time" value="${hhmm(it.end_time)}"></div></div>
+    <div id="loc-wrap" ${it.kind === "termin" ? "" : "hidden"}><label>Ort</label><input name="location" placeholder="z. B. Praxis Dr. Müller, Neuwied" value="${esc(it.location)}"></div>
+    <label>Erinnerung</label>
+    <select name="remind_before">
+      ${[["", "Zur Uhrzeit"], [15, "15 Min. vorher"], [30, "30 Min. vorher"], [60, "1 Std. vorher"], [120, "2 Std. vorher"], [1440, "1 Tag vorher"]]
+        .map(([v, n]) => `<option value="${v}" ${String(it.remind_before ?? (it.kind === "termin" && !item.id ? 15 : "")) === String(v) ? "selected" : ""}>${n}</option>`).join("")}
+    </select>
+    ${prioSeg(it.priority)}
+    <label>Bereich</label>
+    <select name="area"><option value="">Kein Bereich</option>${Object.entries(AREAS).map(([k, v]) => `<option value="${k}" ${it.area === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+    <label>Checkliste</label>
+    <div id="cl-list"></div>
+    <button type="button" class="ghost" id="cl-add" style="text-align:left;margin-top:0">+ Punkt hinzufügen</button>
     <label>Notiz</label><textarea name="notes" rows="2">${esc(it.notes)}</textarea>
     <button class="primary" value="save">Speichern</button>
     ${item.id ? `<button type="button" class="ghost danger" id="del">Löschen</button>` : ""}
     <button type="button" class="ghost" id="cancel">Abbrechen</button>`;
   let kind = it.kind;
+  const getPrio = bindPrio(it.priority);
+  const clRow = (c = { t: "", d: false }) => {
+    const row = document.createElement("div");
+    row.className = "cl-row";
+    row.innerHTML = `<input type="checkbox" ${c.d ? "checked" : ""} aria-label="Erledigt"><input class="cl-text" placeholder="Punkt" value="${esc(c.t)}"><button type="button" class="cl-del" aria-label="Entfernen">×</button>`;
+    row.querySelector(".cl-del").onclick = () => row.remove();
+    $("#cl-list").append(row);
+    return row;
+  };
+  (it.checklist ?? []).forEach((c) => clRow(c));
+  $("#cl-add").onclick = () => clRow().querySelector(".cl-text").focus();
+  const getChecklist = () => [...form.querySelectorAll(".cl-row")]
+    .map((r) => ({ t: r.querySelector(".cl-text").value.trim(), d: r.querySelector("input[type=checkbox]").checked }))
+    .filter((c) => c.t);
   form.querySelectorAll("#kind-seg button").forEach((b) => (b.onclick = () => {
     if (b.dataset.k === "routine") { sheet.close(); openRoutineSheet({ title: form.title.value }); return; }
     kind = b.dataset.k;
     $("#date-label").textContent = kind === "aufgabe" ? "Fällig am" : "Datum";
+    $("#loc-wrap").hidden = kind !== "termin";
     form.querySelectorAll("#kind-seg button").forEach((x) => x.classList.toggle("on", x === b));
   }));
   form.onsubmit = async (e) => {
     e.preventDefault();
     const f = new FormData(form);
-    const row = { kind, title: f.get("title").trim(), on_date: f.get("on_date"), start_time: f.get("start_time") || null, end_time: f.get("end_time") || null, notes: f.get("notes").trim() || null };
+    const row = { kind, title: f.get("title").trim(), on_date: f.get("on_date"), start_time: f.get("start_time") || null, end_time: f.get("end_time") || null, notes: f.get("notes").trim() || null,
+      location: kind === "termin" ? f.get("location").trim() || null : null,
+      remind_before: f.get("remind_before") ? Number(f.get("remind_before")) : null, priority: getPrio(),
+      area: f.get("area") || null, checklist: getChecklist() };
     const { error } = item.id ? await db.from("items").update(row).eq("id", item.id) : await db.from("items").insert(row);
     if (error) return toast(error.message);
-    sheet.close(); refresh();
+    closeSheet(sheet); refresh();
   };
   bindSheetButtons(async () => { await db.from("items").delete().eq("id", item.id); });
-  sheet.showModal();
+  openSheet(sheet);
 }
 
 function openRoutineSheet(r = {}) {
@@ -439,6 +624,7 @@ function openRoutineSheet(r = {}) {
       <div id="fix-time" ${rt.anchor_prayer ? "hidden" : ""}><label>Uhrzeit</label><input name="at_time" type="time" value="${hhmm(rt.at_time)}"></div>
       <div id="anchor-off" ${rt.anchor_prayer ? "" : "hidden"}><label>Minuten danach</label><input name="anchor_offset" type="number" min="0" max="240" step="5" value="${rt.anchor_offset ?? 15}"></div>
     </div>`}
+    ${prioSeg(rt.priority)}
     <label>Wiederholen an</label>
     <div class="seg" id="days-seg">${DAY_SHORT.map((d, i) => `<button type="button" data-d="${i + 1}" class="${days.includes(i + 1) ? "on" : ""}">${d}</button>`).join("")}</div>
     <label>Notiz</label><textarea name="notes" rows="2">${esc(rt.notes)}</textarea>
@@ -446,6 +632,7 @@ function openRoutineSheet(r = {}) {
     <button class="primary" value="save">Speichern</button>
     ${r.id ? `<button type="button" class="ghost danger" id="del">Löschen</button>` : ""}
     <button type="button" class="ghost" id="cancel">Abbrechen</button>`;
+  const getPrio = bindPrio(rt.priority);
   const anchorSel = form.querySelector('[name="anchor"]');
   if (anchorSel) anchorSel.onchange = () => {
     $("#fix-time").hidden = !!anchorSel.value;
@@ -460,7 +647,7 @@ function openRoutineSheet(r = {}) {
     e.preventDefault();
     if (!days.length) return toast("Mindestens einen Tag wählen");
     const f = new FormData(form);
-    const row = { title: f.get("title").trim(), category: f.get("category"), days, notes: f.get("notes").trim() || null, active: f.get("active") === "on" };
+    const row = { title: f.get("title").trim(), category: f.get("category"), days, notes: f.get("notes").trim() || null, active: f.get("active") === "on", priority: getPrio() };
     if (!rt.prayer) {
       row.anchor_prayer = f.get("anchor") || null;
       row.anchor_offset = Number(f.get("anchor_offset") || 15);
@@ -468,16 +655,16 @@ function openRoutineSheet(r = {}) {
     }
     const { error } = r.id ? await db.from("routines").update(row).eq("id", r.id) : await db.from("routines").insert(row);
     if (error) return toast(error.message);
-    sheet.close(); refresh();
+    closeSheet(sheet); refresh();
   };
   bindSheetButtons(async () => { await db.from("routines").delete().eq("id", r.id); });
-  sheet.showModal();
+  openSheet(sheet);
 }
 
 function bindSheetButtons(onDelete) {
-  form.querySelector("#cancel").onclick = () => sheet.close();
+  form.querySelector("#cancel").onclick = () => closeSheet(sheet);
   const del = form.querySelector("#del");
-  if (del) del.onclick = async () => { if (confirm("Wirklich löschen?")) { await onDelete(); sheet.close(); refresh(); } };
+  if (del) del.onclick = async () => { if (confirm("Wirklich löschen?")) { await onDelete(); closeSheet(sheet); refresh(); } };
 }
 
 // ---------- Sprache ----------
@@ -488,10 +675,10 @@ let rec = null;
 $("#mic").onclick = () => {
   $("#cmd-input").value = "";
   $("#preview").hidden = true;
-  voice.showModal();
+  openSheet(voice);
   startListening();
 };
-$("#voice-close").onclick = () => { stopListening(); voice.close(); };
+$("#voice-close").onclick = () => { stopListening(); closeSheet(voice); };
 $("#voice-orb").onclick = () => (rec ? stopListening() : startListening());
 voice.querySelectorAll(".examples button").forEach((b) => (b.onclick = () => { $("#cmd-input").value = b.textContent; showPreview(); }));
 $("#cmd-input").addEventListener("input", showPreview);
@@ -550,7 +737,7 @@ $("#cmd-form").onsubmit = async (e) => {
   e.preventDefault();
   const v = $("#cmd-input").value.trim();
   if (!v) return;
-  voice.close();
+  closeSheet(voice);
   await runCommand(v);
 };
 
