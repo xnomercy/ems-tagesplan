@@ -25,11 +25,11 @@
     <div class="login-box">
       <img src="ems-logo.png" alt="EMS IT Dienstleister" class="login-logo">
       <p class="eyebrow">Tagesplan</p>
-      <h1>Klarer Tag.<br>Alles im Griff.</h1>
+      <h1 data-i18n>Klarer Tag.<br>Alles im Griff.</h1>
       <form id="login-form">
-        <input id="login-email" type="email" autocomplete="username" placeholder="E-Mail" required>
-        <div class="pw"><input id="login-pass" type="password" autocomplete="current-password" placeholder="Passwort" required><button type="button" class="eye" data-eye aria-label="Passwort anzeigen"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
-        <button type="submit" class="primary">Anmelden</button>
+        <input id="login-email" type="email" autocomplete="username" placeholder="E-Mail" data-i18n-ph required>
+        <div class="pw"><input id="login-pass" type="password" autocomplete="current-password" placeholder="Passwort" data-i18n-ph required><button type="button" class="eye" data-eye aria-label="Passwort anzeigen" data-i18n-aria><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
+        <button type="submit" class="primary" data-i18n>Anmelden</button>
       </form>
       <p id="login-msg" class="muted"></p>
     </div>
@@ -43,7 +43,7 @@
         <div id="greeting" class="h-name"></div>
         <div id="today-date" class="muted small"></div>
       </div>
-      <button class="round-btn" id="add" aria-label="Neu anlegen">
+      <button class="round-btn" id="add" aria-label="Neu anlegen" data-i18n-aria>
         <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
       </button>
     </header>
@@ -57,21 +57,21 @@
 
     <nav class="tabs">
       <button data-view="heute" class="active" aria-label="Tag">
-        <svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg><span>Tag</span>
+        <svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg><span data-i18n>Tag</span>
       </button>
       <button data-view="termine" aria-label="Termine">
-        <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg><span>Termine</span>
+        <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg><span data-i18n>Termine</span>
       </button>
       <div class="fab-slot">
-        <button id="mic" class="fab" aria-label="Sprechen">
+        <button id="mic" class="fab" aria-label="Sprechen" data-i18n-aria>
           <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>
         </button>
       </div>
       <button data-view="plan" aria-label="Routinen">
-        <svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg><span>Routinen</span>
+        <svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg><span data-i18n>Routinen</span>
       </button>
       <button data-view="mehr" aria-label="Mehr">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg><span>Mehr</span>
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg><span data-i18n>Mehr</span>
       </button>
     </nav>
   </section>
@@ -79,24 +79,24 @@
   <!-- Sprach-Blatt -->
   <dialog id="voice">
     <div class="voice-wrap">
-      <button type="button" id="voice-close" class="sheet-close" aria-label="Schließen">
+      <button type="button" id="voice-close" class="sheet-close" aria-label="Schließen" data-i18n-aria>
         <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
       </button>
-      <p class="eyebrow">Sag einfach, was ansteht</p>
-      <button type="button" id="voice-orb" class="orb" aria-label="Zuhören starten">
+      <p class="eyebrow" data-i18n>Sag einfach, was ansteht</p>
+      <button type="button" id="voice-orb" class="orb" aria-label="Zuhören starten" data-i18n-aria>
         <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>
       </button>
-      <div id="voice-state" class="muted small">Tippe zum Sprechen</div>
+      <div id="voice-state" class="muted small" data-i18n>Tippe zum Sprechen</div>
       <form id="cmd-form">
-        <textarea id="cmd-input" rows="2" placeholder="Oder hier tippen bzw. das Tastatur-Mikro nutzen" enterkeyhint="send"></textarea>
+        <textarea id="cmd-input" rows="2" placeholder="Oder hier tippen bzw. das Tastatur-Mikro nutzen" data-i18n-ph enterkeyhint="send"></textarea>
         <div id="preview" class="preview" hidden></div>
-        <button class="primary" id="cmd-run">Übernehmen</button>
+        <button class="primary" id="cmd-run" data-i18n>Übernehmen</button>
       </form>
       <div class="examples">
-        <button type="button">Leg Aufgabe an Steuer muss bis Freitag fertig sein</button>
-        <button type="button">Täglich um 21 Uhr Buch lesen</button>
-        <button type="button">Termin morgen um 15 Uhr Zahnarzt</button>
-        <button type="button">Asr erledigt</button>
+        <button type="button" data-i18n>Leg Aufgabe an Steuer muss bis Freitag fertig sein</button>
+        <button type="button" data-i18n>Täglich um 21 Uhr Buch lesen</button>
+        <button type="button" data-i18n>Termin morgen um 15 Uhr Zahnarzt</button>
+        <button type="button" data-i18n>Asr erledigt</button>
       </div>
     </div>
   </dialog>
@@ -105,6 +105,9 @@
   <dialog id="sheet">
     <form id="sheet-form" method="dialog"></form>
   </dialog>
+
+  <!-- Eigene Datums- und Uhrzeitauswahl -->
+  <dialog id="picker"><div id="picker-body"></div></dialog>
 
   <div id="toast" hidden></div>
 

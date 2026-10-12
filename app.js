@@ -1,4 +1,6 @@
 import { parse, isoDate } from "./parser.js";
+import { parseTr } from "./parser-tr.js";
+import { t, LANG, LOCALE, setLang, translateStatic } from "./i18n.js";
 
 const SUPABASE_URL = "https://hpxdhtuabzqwyslzcmbt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kKiQdntJd893YvBPFx7fhw_FYzlwwtz";
@@ -12,10 +14,12 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const hhmm = (t) => (t ? t.slice(0, 5) : "");
 const weekday = (d) => ((d.getDay() + 6) % 7) + 1; // 1 = Montag
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
-const fmtDay = (iso, opts = { weekday: "short", day: "numeric", month: "short" }) => new Date(iso + "T00:00").toLocaleDateString("de-DE", opts);
-const DAY_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
-const CATEGORIES = { gebet: "Gebet", lesen: "Lesen", training: "Training", supps: "Supplements", pflege: "Pflege", essen: "Essen", sonstiges: "Sonstiges" };
-const AREAS = { arbeit: "Arbeit", privat: "Privat", gesundheit: "Gesundheit", familie: "Familie", finanzen: "Finanzen", haushalt: "Haushalt" };
+const fmtDay = (iso, opts = { weekday: "short", day: "numeric", month: "short" }) => new Date(iso + "T00:00").toLocaleDateString(LOCALE(), opts);
+const DAY_KEYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+const DAY_SHORT = new Proxy([], { get: (_, k) => (k === "map" ? (fn) => DAY_KEYS.map((d, i) => fn(t(d), i)) : k in DAY_KEYS && /^\d+$/.test(k) ? t(DAY_KEYS[k]) : DAY_KEYS[k]) });
+const L = (obj) => new Proxy(obj, { get: (o, k) => (typeof o[k] === "string" ? t(o[k]) : o[k]) });
+const CATEGORIES = L({ gebet: "Gebet", lesen: "Lesen", training: "Training", supps: "Supplements", pflege: "Pflege", essen: "Essen", sonstiges: "Sonstiges" });
+const AREAS = L({ arbeit: "Arbeit", privat: "Privat", gesundheit: "Gesundheit", familie: "Familie", finanzen: "Finanzen", haushalt: "Haushalt" });
 const VAPID_PUBLIC = "BNV7U2HOxe9fvDt3Ni1eyeGrlVFLT5stsCgcKnU3pF9Ajqu5OWhv0b6qoLrtdcpFtH3J_3gK9CMu4uFbiAbKCk8";
 const PRAYER_API = { fajr: "Fajr", dhuhr: "Dhuhr", asr: "Asr", maghrib: "Maghrib", isha: "Isha" };
 const CHECK_SVG = '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
@@ -71,16 +75,16 @@ async function showScreen() {
 
 $("#login-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  $("#login-msg").textContent = "Melde an …";
+  $("#login-msg").textContent = t("Melde an …");
   const { error } = await db.auth.signInWithPassword({ email: $("#login-email").value.trim(), password: $("#login-pass").value });
   $("#login-msg").textContent = error ? loginError(error) : "";
 });
 
 function loginError(err) {
   const m = err.message || "";
-  if (/invalid login/i.test(m)) return "E-Mail oder Passwort stimmt nicht.";
-  if (/not confirmed/i.test(m)) return "Bitte zuerst den Link in der Bestätigungsmail anklicken.";
-  if (/database error|not allowed/i.test(m)) return "Diese E-Mail darf hier kein Konto anlegen.";
+  if (/invalid login/i.test(m)) return t("E-Mail oder Passwort stimmt nicht.");
+  if (/not confirmed/i.test(m)) return t("Bitte zuerst den Link in der Bestätigungsmail anklicken.");
+  if (/database error|not allowed/i.test(m)) return t("Diese E-Mail darf hier kein Konto anlegen.");
   return m;
 }
 
@@ -124,7 +128,7 @@ async function refresh() {
     db.from("items").select("*").eq("kind", "aufgabe").eq("done", false)
       .gte("on_date", isoDate(addDays(new Date(), -60))).lte("on_date", isoDate(addDays(new Date(), 14))).order("on_date"),
   ]);
-  if (r.error) { toast("Laden fehlgeschlagen: " + r.error.message); return; }
+  if (r.error) { toast(t("Laden fehlgeschlagen: {x}", { x: r.error.message })); return; }
   state.routines = r.data;
   const done = new Set((c.data ?? []).map((x) => x.routine_id));
   const wd = weekday(state.day);
@@ -158,28 +162,28 @@ function routineTime(rt, pt) {
   }
   return hhmm(rt.at_time) || null;
 }
-const routineWhen = (r) => r.prayer ? "auto" : r.anchor_prayer ? `${PRAYER_NAMES[r.anchor_prayer]} +${r.anchor_offset}` : hhmm(r.at_time) || "–";
+const routineWhen = (r) => r.prayer ? t("auto") : r.anchor_prayer ? `${PRAYER_NAMES[r.anchor_prayer]} +${r.anchor_offset}` : hhmm(r.at_time) || "–";
 
 // ---------- Anzeige ----------
 function render() {
   const h = new Date().getHours();
-  $("#greeting").textContent = (h < 11 ? "Guten Morgen" : h < 17 ? "Hallo" : "Guten Abend") + ", Enes";
-  $("#today-date").textContent = new Date().toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" });
+  $("#greeting").textContent = t(h < 11 ? "Guten Morgen" : h < 17 ? "Hallo" : "Guten Abend") + ", Enes";
+  $("#today-date").textContent = new Date().toLocaleDateString(LOCALE(), { weekday: "long", day: "numeric", month: "long" });
   ({ heute: renderDay, plan: renderPlan, termine: renderTermine, mehr: renderMehr })[state.view]();
 }
 
 function itemHtml(e, { next = false, showTime = false } = {}) {
-  const label = e.kind === "termin" ? "Termin" : e.kind === "aufgabe" ? "Aufgabe" : CATEGORIES[e.category] ?? "";
+  const label = e.kind === "termin" ? t("Termin") : e.kind === "aufgabe" ? t("Aufgabe") : CATEGORIES[e.category] ?? "";
   const today = isoDate(new Date());
   let badge = "";
   if (e.kind === "aufgabe" && e.on_date && e.on_date !== isoDate(state.day)) {
-    badge = e.on_date < today ? `<span class="badge late">überfällig</span>` : `<span class="badge">bis ${fmtDay(e.on_date, { weekday: "short" })}</span>`;
+    badge = e.on_date < today ? `<span class="badge late">${t("überfällig")}</span>` : `<span class="badge">${t("bis {d}", { d: fmtDay(e.on_date, { weekday: "short" }) })}</span>`;
   }
-  if (e.priority === "hoch") badge += `<span class="badge prio">Wichtig</span>`;
+  if (e.priority === "hoch") badge += `<span class="badge prio">${t("Wichtig")}</span>`;
   const cl = e.raw?.checklist ?? [];
   if (e.kind !== "routine" && cl.length) badge += `<span class="badge">${cl.filter((c) => c.d).length}/${cl.length}</span>`;
   const areaLabel = e.kind !== "routine" && e.raw?.area ? " · " + (AREAS[e.raw.area] ?? e.raw.area) : "";
-  const end = e.end ? ` bis ${e.end}` : "";
+  const end = e.end ? t(" bis {t}", { t: e.end }) : "";
   return `<div class="card-item ${e.kind} ${e.done ? "done" : ""} ${next ? "next" : ""}" data-detail="${e.id}" role="button" tabindex="0">
     <div class="body">
       <div class="cat"><i></i>${label}${areaLabel}${showTime && e.time ? " · " + e.time : ""}${end} ${badge}</div>
@@ -187,7 +191,7 @@ function itemHtml(e, { next = false, showTime = false } = {}) {
       ${e.location ? `<div class="notes">${esc(e.location)}</div>` : ""}
       ${e.notes ? `<div class="notes clamp">${esc(e.notes)}</div>` : ""}
     </div>
-    <button class="check ${e.done ? "on" : ""}" data-toggle="${e.kind}:${e.id}" aria-label="${e.done ? "Nicht erledigt" : "Erledigt"}">${e.done ? CHECK_SVG : ""}</button>
+    <button class="check ${e.done ? "on" : ""}" data-toggle="${e.kind}:${e.id}" aria-label="${t(e.done ? "Nicht erledigt" : "Erledigt")}">${e.done ? CHECK_SVG : ""}</button>
   </div>`;
 }
 
@@ -213,29 +217,29 @@ function renderDay() {
   const next = isToday ? timed.find((e) => !e.done && e.time >= nowT) : null;
 
   let html = `<section class="hero">
-    ${isToday ? "" : `<button class="to-today" data-day="${isoDate(new Date())}">Zu heute</button>`}
-    <p class="eyebrow">${isToday ? "Dein Tag" : fmtDay(isoDate(state.day), { weekday: "long" })}</p>
-    <h2>${total ? (done === total ? "Alles erledigt." : `${total - done} ${total - done === 1 ? "Punkt" : "Punkte"} offen`) : "Noch nichts geplant"}</h2>
-    <div class="next">${next ? `Als Nächstes: ${esc(next.title)} um ${next.time}` : isToday && total && done < total ? "Für heute keine Uhrzeiten mehr offen." : ""}</div>
+    ${isToday ? "" : `<button class="to-today" data-day="${isoDate(new Date())}">${t("Zu heute")}</button>`}
+    <p class="eyebrow">${isToday ? t("Dein Tag") : fmtDay(isoDate(state.day), { weekday: "long" })}</p>
+    <h2>${total ? (done === total ? t("Alles erledigt.") : total - done === 1 ? t("1 Punkt offen") : t("{n} Punkte offen", { n: total - done })) : t("Noch nichts geplant")}</h2>
+    <div class="next">${next ? t("Als Nächstes: {x} um {t}", { x: esc(next.title), t: next.time }) : isToday && total && done < total ? t("Für heute keine Uhrzeiten mehr offen.") : ""}</div>
     <div class="bar"><div style="width:${pct}%"></div></div>
-    <div class="meta"><span>Fortschritt</span><span>${done} / ${total} · ${pct}%</span></div>
+    <div class="meta"><span>${t("Fortschritt")}</span><span>${done} / ${total} · ${pct}%</span></div>
   </section>`;
   html += dayStrip();
-  if (state.settings && state.settings.lat == null) html += `<div class="hint">Für automatische Gebetszeiten einmal den Standort setzen. <button data-goto="mehr">Jetzt einrichten</button></div>`;
+  if (state.settings && state.settings.lat == null) html += `<div class="hint">${t("Für automatische Gebetszeiten einmal den Standort setzen.")} <button data-goto="mehr">${t("Jetzt einrichten")}</button></div>`;
 
   if (timed.length) {
-    html += `<div class="section-head"><h3>Zeitplan</h3><span class="muted">${fmtDay(isoDate(state.day), { day: "numeric", month: "long" })}</span></div>`;
+    html += `<div class="section-head"><h3>${t("Zeitplan")}</h3><span class="muted">${fmtDay(isoDate(state.day), { day: "numeric", month: "long" })}</span></div>`;
     html += timed.map((e) => `<div class="slot"><div class="t">${e.time}</div>${itemHtml(e, { next: e === next })}</div>`).join("");
   }
   if (untimed.length) {
-    html += `<div class="section-head"><h3>Ohne feste Zeit</h3></div>`;
+    html += `<div class="section-head"><h3>${t("Ohne feste Zeit")}</h3></div>`;
     html += untimed.map((e) => `<div class="slot"><div class="t"></div>${itemHtml(e)}</div>`).join("");
   }
   if (state.open.length) {
-    html += `<div class="section-head"><h3>Offene Aufgaben</h3><span class="muted">mit Frist</span></div>`;
+    html += `<div class="section-head"><h3>${t("Offene Aufgaben")}</h3><span class="muted">${t("mit Frist")}</span></div>`;
     html += state.open.map((e) => `<div class="slot"><div class="t"></div>${itemHtml(e)}</div>`).join("");
   }
-  if (!total && !state.open.length) html += `<div class="empty">Tippe unten aufs Mikro und sag, was ansteht.</div>`;
+  if (!total && !state.open.length) html += `<div class="empty">${t("Tippe unten aufs Mikro und sag, was ansteht.")}</div>`;
   $("#view-heute").innerHTML = html;
   const sel = $("#days .sel");
   if (sel) sel.scrollIntoView({ inline: "center", block: "nearest" });
@@ -244,8 +248,8 @@ function renderDay() {
 function renderPlan() {
   const groups = {};
   for (const r of state.routines) (groups[r.category] ??= []).push(r);
-  let html = `<div class="section-head"><h3>Routinen</h3><span class="muted">${state.routines.length} Einträge</span></div>
-    <p class="muted small" style="margin-top:-4px">Feste, wiederkehrende Punkte. Tippe zum Bearbeiten.</p>`;
+  let html = `<div class="section-head"><h3>${t("Routinen")}</h3><span class="muted">${t("{n} Einträge", { n: state.routines.length })}</span></div>
+    <p class="muted small" style="margin-top:-4px">${t("Feste, wiederkehrende Punkte. Tippe zum Bearbeiten.")}</p>`;
   for (const cat of Object.keys(CATEGORIES)) {
     const list = groups[cat];
     if (!list) continue;
@@ -253,10 +257,10 @@ function renderPlan() {
     html += list.map((r) => `<button class="list-item ${r.active ? "" : "off"}" data-edit-routine="${r.id}">
       <div class="tm">${routineWhen(r)}</div>
       <div class="body"><div class="title">${esc(r.title)}</div>
-      <div class="sub">${r.days.length === 7 ? "täglich" : r.days.map((d) => DAY_SHORT[d - 1]).join(", ")}${r.notes ? " · " + esc(r.notes) : ""}</div></div>
+      <div class="sub">${r.days.length === 7 ? t("täglich") : r.days.map((d) => DAY_SHORT[d - 1]).join(", ")}${r.notes ? " · " + esc(r.notes) : ""}</div></div>
       <span class="muted">›</span></button>`).join("");
   }
-  html += `<button class="primary" id="new-routine">Neue Routine</button>`;
+  html += `<button class="primary" id="new-routine">${t("Neue Routine")}</button>`;
   $("#view-plan").innerHTML = html;
 }
 
@@ -269,18 +273,18 @@ async function renderTermine() {
   state.termineCache = data ?? [];
   const toEntry = (i) => ({ kind: i.kind, id: i.id, title: i.title, time: hhmm(i.start_time) || null, end: hhmm(i.end_time), done: i.done, notes: i.notes, raw: i, on_date: i.on_date, priority: i.priority, location: i.location });
   const used = [...new Set((data ?? []).map((i) => i.area).filter(Boolean))];
-  let html = used.length ? `<div class="chips">${[["", "Alle"], ...used.map((a) => [a, AREAS[a] ?? a])]
+  let html = used.length ? `<div class="chips">${[["", t("Alle")], ...used.map((a) => [a, AREAS[a] ?? a])]
     .map(([v, n]) => `<button class="chip ${f === v ? "on" : ""}" data-area="${v}">${n}</button>`).join("")}</div>` : "";
-  html += `<div class="section-head"><h3>Kommende Termine</h3></div>`;
-  if (!termine.length) html += `<div class="empty">Keine Termine.</div>`;
+  html += `<div class="section-head"><h3>${t("Kommende Termine")}</h3></div>`;
+  if (!termine.length) html += `<div class="empty">${t("Keine Termine.")}</div>`;
   let last = "";
   for (const t of termine) {
     if (t.on_date !== last) { html += `<p class="eyebrow" style="margin-top:14px">${fmtDay(t.on_date, { weekday: "long", day: "numeric", month: "long" })}</p>`; last = t.on_date; }
     html += `<div class="slot"><div class="t">${hhmm(t.start_time)}</div>${itemHtml(toEntry(t))}</div>`;
   }
-  html += `<div class="section-head"><h3>Aufgaben</h3></div>`;
-  html += aufgaben.length ? aufgaben.map((a) => `<div class="slot"><div class="t small">${fmtDay(a.on_date, { day: "numeric", month: "numeric" })}</div>${itemHtml(toEntry(a), { showTime: true })}</div>`).join("") : `<div class="empty">Keine offenen Aufgaben.</div>`;
-  html += `<button class="primary" id="new-item">Termin oder Aufgabe anlegen</button>`;
+  html += `<div class="section-head"><h3>${t("Aufgaben")}</h3></div>`;
+  html += aufgaben.length ? aufgaben.map((a) => `<div class="slot"><div class="t small">${fmtDay(a.on_date, { day: "numeric", month: "numeric" })}</div>${itemHtml(toEntry(a), { showTime: true })}</div>`).join("") : `<div class="empty">${t("Keine offenen Aufgaben.")}</div>`;
+  html += `<button class="primary" id="new-item">${t("Termin oder Aufgabe anlegen")}</button>`;
   $("#view-termine").innerHTML = html;
   $("#view-termine").querySelectorAll("[data-area]").forEach((b) => (b.onclick = () => { state.areaFilter = b.dataset.area; renderTermine(); }));
 }
@@ -289,66 +293,74 @@ function renderMehr() {
   const s = state.settings ?? {};
   const feed = `${SUPABASE_URL}/functions/v1/kalender?token=${s.calendar_token}`;
   $("#view-mehr").innerHTML = `
-    <div class="section-head"><h3>Einstellungen</h3></div>
+    <div class="section-head"><h3>${t("Einstellungen")}</h3></div>
     <div class="card">
-      <p class="eyebrow">Mitteilungen</p>
-      <p id="push-state" class="small">Prüfe …</p>
-      <button class="btn fill" id="push-on">Mitteilungen einschalten</button>
-      <button class="btn" id="push-test">Test senden</button>
-      <label class="small muted" style="display:block;margin-top:12px">Wichtiges erneut melden alle</label>
-      <form><select id="nag">${[10, 15, 20, 30, 45, 60].map((m) => `<option value="${m}" ${(s.nag_minutes ?? 20) === m ? "selected" : ""}>${m} Minuten</option>`).join("")}</select></form>
-      <p class="small muted">Gebete erinnern bis zum nächsten Gebet, Wichtiges bis du es abhakst (höchstens 5 Std., nachts ab 23:30 ist Ruhe).</p>
+      <p class="eyebrow">${t("Sprache")}</p>
+      <div class="seg" id="lang-seg">
+        <button type="button" data-lang="de" class="${LANG === "de" ? "on" : ""}">Deutsch</button>
+        <button type="button" data-lang="tr" class="${LANG === "tr" ? "on" : ""}">Türkçe</button>
+      </div>
     </div>
     <div class="card">
-      <p class="eyebrow">Gebetszeiten</p>
-      <p>${s.lat != null ? `Standort gesetzt (${s.lat.toFixed(2)}, ${s.lng.toFixed(2)}).` : "Noch kein Standort gesetzt."}</p>
-      <button class="btn fill" id="set-loc">Aktuellen Standort verwenden</button>
-      <label class="small muted" style="display:block;margin-top:12px">Berechnung</label>
+      <p class="eyebrow">${t("Mitteilungen")}</p>
+      <p id="push-state" class="small">${state.pushText ?? t("Prüfe …")}</p>
+      <button class="btn fill" id="push-on">${state.pushBtn ?? t("Mitteilungen einschalten")}</button>
+      <button class="btn" id="push-test">${t("Test senden")}</button>
+      <label class="small muted" style="display:block;margin-top:12px">${t("Wichtiges erneut melden alle")}</label>
+      <form><select id="nag">${[10, 15, 20, 30, 45, 60].map((m) => `<option value="${m}" ${(s.nag_minutes ?? 20) === m ? "selected" : ""}>${t("{n} Minuten", { n: m })}</option>`).join("")}</select></form>
+      <p class="small muted">${t("Gebete erinnern bis zum nächsten Gebet, Wichtiges bis du es abhakst (höchstens 5 Std., nachts ab 23:30 ist Ruhe).")}</p>
+    </div>
+    <div class="card">
+      <p class="eyebrow">${t("Gebetszeiten")}</p>
+      <p>${s.lat != null ? t("Standort gesetzt ({x}).", { x: `${s.lat.toFixed(2)}, ${s.lng.toFixed(2)}` }) : t("Noch kein Standort gesetzt.")}</p>
+      <button class="btn fill" id="set-loc">${t("Aktuellen Standort verwenden")}</button>
+      <label class="small muted" style="display:block;margin-top:12px">${t("Berechnung")}</label>
       <form><select id="method">
         ${[[13, "Diyanet (Türkei)"], [3, "Muslim World League"], [2, "ISNA (Nordamerika)"], [4, "Umm al-Qura"], [5, "Ägypten"]]
-          .map(([v, n]) => `<option value="${v}" ${s.prayer_method === v ? "selected" : ""}>${n}</option>`).join("")}
+          .map(([v, n]) => `<option value="${v}" ${s.prayer_method === v ? "selected" : ""}>${t(n)}</option>`).join("")}
       </select></form>
     </div>
     <div class="dark-block">
-      <p class="eyebrow">Kalender verknüpfen</p>
-      <p>Abonniere diesen Link in deinem Kalender. Termine, Routinen und Gebetszeiten erscheinen dort mit Erinnerung und aktualisieren sich von selbst.</p>
-      <p class="small">iPhone: Einstellungen › Kalender › Accounts › Account hinzufügen › Andere › Kalenderabo hinzufügen.</p>
+      <p class="eyebrow">${t("Kalender verknüpfen")}</p>
+      <p>${t("Abonniere diesen Link in deinem Kalender. Termine, Routinen und Gebetszeiten erscheinen dort mit Erinnerung und aktualisieren sich von selbst.")}</p>
+      <p class="small">${t("iPhone: Einstellungen › Kalender › Accounts › Account hinzufügen › Andere › Kalenderabo hinzufügen.")}</p>
     </div>
     <div class="card">
       <code class="link">${esc(feed)}</code>
-      <button class="btn fill" id="open-feed">Im Kalender öffnen</button>
-      <button class="btn" id="copy-feed">Link kopieren</button>
+      <button class="btn fill" id="open-feed">${t("Im Kalender öffnen")}</button>
+      <button class="btn" id="copy-feed">${t("Link kopieren")}</button>
     </div>
     <div class="card">
-      <p class="eyebrow">Passwort ändern</p>
+      <p class="eyebrow">${t("Passwort ändern")}</p>
       <form id="pw-form">
-        <div class="pw"><input id="pw-new" type="password" autocomplete="new-password" placeholder="Neues Passwort (mind. 10 Zeichen)" minlength="10" required><button type="button" class="eye" data-eye aria-label="Passwort anzeigen"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
-        <div class="pw"><input id="pw-repeat" type="password" autocomplete="new-password" placeholder="Neues Passwort wiederholen" minlength="10" required><button type="button" class="eye" data-eye aria-label="Passwort anzeigen"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
-        <button class="btn fill">Passwort speichern</button>
+        <div class="pw"><input id="pw-new" type="password" autocomplete="new-password" placeholder="${t("Neues Passwort (mind. 10 Zeichen)")}" minlength="10" required><button type="button" class="eye" data-eye aria-label="Passwort anzeigen"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
+        <div class="pw"><input id="pw-repeat" type="password" autocomplete="new-password" placeholder="${t("Neues Passwort wiederholen")}" minlength="10" required><button type="button" class="eye" data-eye aria-label="Passwort anzeigen"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
+        <button class="btn fill">${t("Passwort speichern")}</button>
       </form>
     </div>
-    <div class="card"><p class="small muted">Angemeldet als ${esc(state.user?.email)}</p><button class="btn danger" id="logout">Abmelden</button></div>`;
+    <div class="card"><p class="small muted">${t("Angemeldet als {x}", { x: esc(state.user?.email) })}</p><button class="btn danger" id="logout">${t("Abmelden")}</button></div>`;
   $("#pw-form").onsubmit = async (e) => {
     e.preventDefault();
     const pw = $("#pw-new").value;
-    if (pw !== $("#pw-repeat").value) return toast("Die beiden Passwörter sind nicht gleich.");
+    if (pw !== $("#pw-repeat").value) return toast(t("Die beiden Passwörter sind nicht gleich."));
     const { error } = await db.auth.updateUser({ password: pw });
-    if (error) return toast(/different from the old/i.test(error.message) ? "Das ist schon dein aktuelles Passwort." : error.message);
+    if (error) return toast(/different from the old/i.test(error.message) ? t("Das ist schon dein aktuelles Passwort.") : error.message);
     e.target.reset();
-    toast("Passwort geändert");
+    toast(t("Passwort geändert"));
   };
   $("#set-loc").onclick = () => navigator.geolocation.getCurrentPosition(async (p) => {
     await saveSettings({ lat: +p.coords.latitude.toFixed(4), lng: +p.coords.longitude.toFixed(4) });
-    toast("Standort gespeichert");
-  }, () => toast("Standort nicht freigegeben"));
+    toast(t("Standort gespeichert"));
+  }, () => toast(t("Standort nicht freigegeben")));
   $("#nag").onchange = (e) => saveSettings({ nag_minutes: Number(e.target.value) });
   $("#push-on").onclick = enablePush;
   $("#push-test").onclick = sendTestPush;
   updatePushState();
   $("#method").onchange = (e) => saveSettings({ prayer_method: Number(e.target.value) });
-  $("#copy-feed").onclick = () => navigator.clipboard.writeText(feed).then(() => toast("Link kopiert"));
+  $("#copy-feed").onclick = () => navigator.clipboard.writeText(feed).then(() => toast(t("Link kopiert")));
   $("#open-feed").onclick = () => { location.href = feed.replace(/^https:/, "webcal:"); };
   $("#logout").onclick = () => db.auth.signOut();
+  document.querySelectorAll("#lang-seg button").forEach((b) => (b.onclick = () => { setLang(b.dataset.lang); render(); }));
 }
 
 // ---------- Push-Mitteilungen ----------
@@ -358,13 +370,18 @@ const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent);
 async function updatePushState() {
   const el = $("#push-state");
   if (!el) return;
-  if (isIOS() && !standalone()) { el.textContent = "Auf dem iPhone gehen Mitteilungen nur, wenn die App über Teilen › „Zum Home-Bildschirm“ installiert ist und von dort geöffnet wird."; return; }
-  if (!("serviceWorker" in navigator) || !("PushManager" in window)) { el.textContent = "Dieser Browser kann keine Mitteilungen."; return; }
+  // Letzten Stand merken, damit beim Öffnen von Mehr nichts flackert
+  const show = (text, btn) => {
+    state.pushText = text; state.pushBtn = btn ?? state.pushBtn;
+    if ($("#push-state")) $("#push-state").textContent = text;
+    if (btn && $("#push-on")) $("#push-on").textContent = btn;
+  };
+  if (isIOS() && !standalone()) return show(t("Auf dem iPhone gehen Mitteilungen nur, wenn die App über Teilen › „Zum Home-Bildschirm“ installiert ist und von dort geöffnet wird."));
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return show(t("Dieser Browser kann keine Mitteilungen."));
   const reg = await navigator.serviceWorker.ready;
   const sub = await reg.pushManager.getSubscription();
-  el.textContent = Notification.permission === "denied" ? "Mitteilungen sind blockiert. Bitte in den Einstellungen des Handys für Tagesplan erlauben."
-    : sub ? "Mitteilungen sind an für dieses Gerät." : "Mitteilungen sind aus.";
-  $("#push-on").textContent = sub ? "Neu verbinden" : "Mitteilungen einschalten";
+  show(Notification.permission === "denied" ? t("Mitteilungen sind blockiert. Bitte in den Einstellungen des Handys für Tagesplan erlauben.")
+    : sub ? t("Mitteilungen sind an für dieses Gerät.") : t("Mitteilungen sind aus."), t(sub ? "Neu verbinden" : "Mitteilungen einschalten"));
 }
 
 async function enablePush() {
@@ -376,9 +393,9 @@ async function enablePush() {
     const j = sub.toJSON();
     const { error } = await db.from("push_subscriptions").upsert({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth });
     if (error) throw error;
-    toast("Mitteilungen sind an");
+    toast(t("Mitteilungen sind an"));
     sendTestPush();
-  } catch (e) { toast("Mitteilungen gingen nicht an: " + (e.message ?? e)); }
+  } catch (e) { toast(t("Mitteilungen gingen nicht an: {x}", { x: e.message ?? e })); }
   updatePushState();
 }
 
@@ -388,7 +405,7 @@ async function sendTestPush() {
     method: "POST", headers: { Authorization: `Bearer ${data.session?.access_token}`, apikey: SUPABASE_KEY },
   }).catch(() => null);
   const ok = res && res.ok ? (await res.json()).ok : 0;
-  toast(ok ? "Testmitteilung geschickt" : "Kein Gerät verbunden. Erst Mitteilungen einschalten.");
+  toast(t(ok ? "Testmitteilung geschickt" : "Kein Gerät verbunden. Erst Mitteilungen einschalten."));
 }
 
 async function saveSettings(patch) {
@@ -452,9 +469,9 @@ const sheet = $("#sheet"), form = $("#sheet-form");
 function openSheet(d) {
   d.classList.remove("closing");
   d.style.transform = "";
-  if (!d.querySelector(".sheet-x")) {
+  if (!d.querySelector(".sheet-x, .sheet-close")) {
     const x = document.createElement("button");
-    x.type = "button"; x.className = "sheet-x"; x.setAttribute("aria-label", "Schließen");
+    x.type = "button"; x.className = "sheet-x"; x.setAttribute("aria-label", t("Schließen"));
     x.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>`;
     x.onclick = () => { if (d.id === "voice") stopListening(); closeSheet(d); };
     d.prepend(x);
@@ -467,7 +484,7 @@ function closeSheet(d) {
   d.classList.add("closing");
   setTimeout(() => { d.classList.remove("closing"); d.style.transform = ""; d.close(); }, 220);
 }
-for (const d of [sheet, $("#voice")]) {
+for (const d of [sheet, $("#voice"), $("#picker")]) {
   // Tipp neben das Blatt schließt es
   d.addEventListener("click", (e) => { if (e.target === d) { if (d.id === "voice") stopListening(); closeSheet(d); } });
   d.addEventListener("cancel", (e) => { e.preventDefault(); closeSheet(d); });
@@ -491,29 +508,29 @@ for (const d of [sheet, $("#voice")]) {
 function openDetail(e) {
   const raw = e.raw ?? {};
   const isRoutine = e.kind === "routine";
-  const kindLabel = e.kind === "termin" ? "Termin" : e.kind === "aufgabe" ? "Aufgabe" : CATEGORIES[e.category] ?? "Routine";
+  const kindLabel = e.kind === "termin" ? t("Termin") : e.kind === "aufgabe" ? t("Aufgabe") : CATEGORIES[e.category] ?? t("Routine");
   const when = isRoutine
-    ? `${raw.days?.length === 7 ? "Täglich" : (raw.days ?? []).map((d) => DAY_SHORT[d - 1]).join(", ")}${e.time ? " · " + e.time : ""}${raw.anchor_prayer ? ` (${PRAYER_NAMES[raw.anchor_prayer]} +${raw.anchor_offset})` : raw.prayer ? " (Gebetszeit)" : ""}`
+    ? `${raw.days?.length === 7 ? t("Täglich") : (raw.days ?? []).map((d) => DAY_SHORT[d - 1]).join(", ")}${e.time ? " · " + e.time : ""}${raw.anchor_prayer ? ` (${PRAYER_NAMES[raw.anchor_prayer]} +${raw.anchor_offset})` : raw.prayer ? ` (${t("Gebetszeit")})` : ""}`
     : `${fmtDay(raw.on_date, { weekday: "long", day: "numeric", month: "long" })}${raw.start_time ? " · " + hhmm(raw.start_time) : ""}${raw.end_time ? "–" + hhmm(raw.end_time) : ""}`;
-  const remind = raw.remind_before ? `${raw.remind_before >= 60 ? raw.remind_before / 60 + " Std." : raw.remind_before + " Min."} vorher` : null;
+  const remind = raw.remind_before ? (raw.remind_before >= 60 ? t("{n} Std. vorher", { n: raw.remind_before / 60 }) : t("{n} Min. vorher", { n: raw.remind_before })) : null;
   const rows = [
-    [e.kind === "aufgabe" ? "Fällig" : "Wann", when],
-    raw.location ? ["Ort", `<a href="https://maps.apple.com/?q=${encodeURIComponent(raw.location)}" target="_blank" rel="noopener">${esc(raw.location)}</a>`] : null,
-    ["Priorität", e.priority === "hoch" ? "Hoch, erinnert bis erledigt" : "Normal"],
-    remind ? ["Erinnerung", remind] : null,
-    !isRoutine && raw.area ? ["Bereich", AREAS[raw.area] ?? esc(raw.area)] : null,
-    raw.notes ? ["Notiz", esc(raw.notes).replace(/\n/g, "<br>")] : null,
+    [t(e.kind === "aufgabe" ? "Fällig" : "Wann"), when],
+    raw.location ? [t("Ort"), `<a href="https://maps.apple.com/?q=${encodeURIComponent(raw.location)}" target="_blank" rel="noopener">${esc(raw.location)}</a>`] : null,
+    [t("Priorität"), t(e.priority === "hoch" ? "Hoch, erinnert bis erledigt" : "Normal")],
+    remind ? [t("Erinnerung"), remind] : null,
+    !isRoutine && raw.area ? [t("Bereich"), AREAS[raw.area] ?? esc(raw.area)] : null,
+    raw.notes ? [t("Notiz"), esc(raw.notes).replace(/\n/g, "<br>")] : null,
   ].filter(Boolean);
   const cl = isRoutine ? [] : raw.checklist ?? [];
   form.innerHTML = `<p class="eyebrow">${kindLabel}</p>
     <h3 class="detail-title">${esc(e.title)}</h3>
     <dl class="details">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
-    ${cl.length ? `<p class="eyebrow" style="margin-top:14px">Checkliste</p><div class="checklist">${cl.map((c, i) =>
+    ${cl.length ? `<p class="eyebrow" style="margin-top:14px">${t("Checkliste")}</p><div class="checklist">${cl.map((c, i) =>
       `<label class="cl-item"><input type="checkbox" data-cl="${i}" ${c.d ? "checked" : ""}><span>${esc(c.t)}</span></label>`).join("")}</div>` : ""}
-    <button type="button" class="primary" id="d-done">${e.done ? "Wieder öffnen" : "Erledigt"}</button>
+    <button type="button" class="primary" id="d-done">${t(e.done ? "Wieder öffnen" : "Erledigt")}</button>
     <div class="row">
-      <button type="button" class="ghost" id="d-edit">Bearbeiten</button>
-      ${isRoutine ? "" : `<button type="button" class="ghost danger" id="d-del">Löschen</button>`}
+      <button type="button" class="ghost" id="d-edit">${t("Bearbeiten")}</button>
+      ${isRoutine ? "" : `<button type="button" class="ghost danger" id="d-del">${t("Löschen")}</button>`}
     </div>`;
   form.onsubmit = (ev) => ev.preventDefault();
   form.querySelectorAll("[data-cl]").forEach((box) => (box.onchange = async () => {
@@ -528,15 +545,15 @@ function openDetail(e) {
   };
   $("#d-edit").onclick = () => { sheet.close(); isRoutine ? openRoutineSheet(raw) : openItemSheet(raw); };
   const del = $("#d-del");
-  if (del) del.onclick = async () => { if (confirm("Wirklich löschen?")) { await db.from("items").delete().eq("id", e.id); closeSheet(sheet); refresh(); } };
+  if (del) del.onclick = async () => { if (confirm(t("Wirklich löschen?"))) { await db.from("items").delete().eq("id", e.id); closeSheet(sheet); refresh(); } };
   openSheet(sheet);
 }
 
 // ---------- Formulare ----------
-const prioSeg = (p) => `<label>Priorität</label>
+const prioSeg = (p) => `<label>${t("Priorität")}</label>
     <div class="seg" id="prio-seg">
-      <button type="button" data-p="normal" class="${p !== "hoch" ? "on" : ""}">Normal</button>
-      <button type="button" data-p="hoch" class="${p === "hoch" ? "on" : ""}">Hoch (nervt)</button>
+      <button type="button" data-p="normal" class="${p !== "hoch" ? "on" : ""}">${t("Normal")}</button>
+      <button type="button" data-p="hoch" class="${p === "hoch" ? "on" : ""}">${t("Hoch (nervt)")}</button>
     </div>`;
 function bindPrio(initial) {
   let prio = initial === "hoch" ? "hoch" : "normal";
@@ -550,38 +567,38 @@ function bindPrio(initial) {
 function openItemSheet(item = {}, preset = {}) {
   item = item ?? {};
   const it = { kind: "aufgabe", on_date: isoDate(state.day), ...preset, ...item };
-  form.innerHTML = `<h3>${item.id ? "Bearbeiten" : "Neu anlegen"}</h3>
+  form.innerHTML = `<h3>${t(item.id ? "Bearbeiten" : "Neu anlegen")}</h3>
     ${item.id ? "" : `<div class="seg" id="kind-seg">
-      <button type="button" data-k="aufgabe" class="${it.kind === "aufgabe" ? "on" : ""}">Aufgabe</button>
-      <button type="button" data-k="termin" class="${it.kind === "termin" ? "on" : ""}">Termin</button>
-      <button type="button" data-k="routine">Routine</button>
+      <button type="button" data-k="aufgabe" class="${it.kind === "aufgabe" ? "on" : ""}">${t("Aufgabe")}</button>
+      <button type="button" data-k="termin" class="${it.kind === "termin" ? "on" : ""}">${t("Termin")}</button>
+      <button type="button" data-k="routine">${t("Routine")}</button>
     </div>`}
-    <input name="title" placeholder="Was?" required value="${esc(it.title)}">
-    <label id="date-label">${it.kind === "aufgabe" ? "Fällig am" : "Datum"}</label><input name="on_date" type="date" required value="${it.on_date}">
-    <div class="row"><div><label>Von</label><input name="start_time" type="time" value="${hhmm(it.start_time)}"></div>
-    <div><label>Bis</label><input name="end_time" type="time" value="${hhmm(it.end_time)}"></div></div>
-    <div id="loc-wrap" ${it.kind === "termin" ? "" : "hidden"}><label>Ort</label><input name="location" placeholder="z. B. Praxis Dr. Müller, Neuwied" value="${esc(it.location)}"></div>
-    <label>Erinnerung</label>
+    <input name="title" placeholder="${t("Was?")}" required value="${esc(it.title)}">
+    <label id="date-label">${t(it.kind === "aufgabe" ? "Fällig am" : "Datum")}</label><input name="on_date" type="date" required value="${it.on_date}">
+    <div class="row"><div><label>${t("Von")}</label><input name="start_time" type="time" value="${hhmm(it.start_time)}"></div>
+    <div><label>${t("Bis")}</label><input name="end_time" type="time" value="${hhmm(it.end_time)}"></div></div>
+    <div id="loc-wrap" ${it.kind === "termin" ? "" : "hidden"}><label>${t("Ort")}</label><input name="location" placeholder="${t("z. B. Praxis Dr. Müller, Neuwied")}" value="${esc(it.location)}"></div>
+    <label>${t("Erinnerung")}</label>
     <select name="remind_before">
-      ${[["", "Zur Uhrzeit"], [15, "15 Min. vorher"], [30, "30 Min. vorher"], [60, "1 Std. vorher"], [120, "2 Std. vorher"], [1440, "1 Tag vorher"]]
+      ${[["", t("Zur Uhrzeit")], [15, t("{n} Min. vorher", { n: 15 })], [30, t("{n} Min. vorher", { n: 30 })], [60, t("{n} Std. vorher", { n: 1 })], [120, t("{n} Std. vorher", { n: 2 })], [1440, t("1 Tag vorher")]]
         .map(([v, n]) => `<option value="${v}" ${String(it.remind_before ?? (it.kind === "termin" && !item.id ? 15 : "")) === String(v) ? "selected" : ""}>${n}</option>`).join("")}
     </select>
     ${prioSeg(it.priority)}
-    <label>Bereich</label>
-    <select name="area"><option value="">Kein Bereich</option>${Object.entries(AREAS).map(([k, v]) => `<option value="${k}" ${it.area === k ? "selected" : ""}>${v}</option>`).join("")}</select>
-    <label>Checkliste</label>
+    <label>${t("Bereich")}</label>
+    <select name="area"><option value="">${t("Kein Bereich")}</option>${Object.entries(AREAS).map(([k, v]) => `<option value="${k}" ${it.area === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+    <label>${t("Checkliste")}</label>
     <div id="cl-list"></div>
-    <button type="button" class="ghost" id="cl-add" style="text-align:left;margin-top:0">+ Punkt hinzufügen</button>
-    <label>Notiz</label><textarea name="notes" rows="2">${esc(it.notes)}</textarea>
-    <div class="sheet-actions"><button class="primary" value="save">Speichern</button></div>
-    ${item.id ? `<button type="button" class="ghost danger" id="del">Löschen</button>` : ""}
-    <button type="button" class="ghost" id="cancel">Abbrechen</button>`;
+    <button type="button" class="ghost" id="cl-add" style="text-align:left;margin-top:0">${t("+ Punkt hinzufügen")}</button>
+    <label>${t("Notiz")}</label><textarea name="notes" rows="2">${esc(it.notes)}</textarea>
+    <div class="sheet-actions"><button class="primary" value="save">${t("Speichern")}</button></div>
+    ${item.id ? `<button type="button" class="ghost danger" id="del">${t("Löschen")}</button>` : ""}
+    <button type="button" class="ghost" id="cancel">${t("Abbrechen")}</button>`;
   let kind = it.kind;
   const getPrio = bindPrio(it.priority);
   const clRow = (c = { t: "", d: false }) => {
     const row = document.createElement("div");
     row.className = "cl-row";
-    row.innerHTML = `<input type="checkbox" ${c.d ? "checked" : ""} aria-label="Erledigt"><input class="cl-text" placeholder="Punkt" value="${esc(c.t)}"><button type="button" class="cl-del" aria-label="Entfernen">×</button>`;
+    row.innerHTML = `<input type="checkbox" ${c.d ? "checked" : ""} aria-label="${t("Erledigt")}"><input class="cl-text" placeholder="${t("Punkt")}" value="${esc(c.t)}"><button type="button" class="cl-del" aria-label="${t("Entfernen")}">×</button>`;
     row.querySelector(".cl-del").onclick = () => row.remove();
     $("#cl-list").append(row);
     return row;
@@ -594,7 +611,7 @@ function openItemSheet(item = {}, preset = {}) {
   form.querySelectorAll("#kind-seg button").forEach((b) => (b.onclick = () => {
     if (b.dataset.k === "routine") { sheet.close(); openRoutineSheet({ title: form.title.value }); return; }
     kind = b.dataset.k;
-    $("#date-label").textContent = kind === "aufgabe" ? "Fällig am" : "Datum";
+    $("#date-label").textContent = t(kind === "aufgabe" ? "Fällig am" : "Datum");
     $("#loc-wrap").hidden = kind !== "termin";
     form.querySelectorAll("#kind-seg button").forEach((x) => x.classList.toggle("on", x === b));
   }));
@@ -610,6 +627,7 @@ function openItemSheet(item = {}, preset = {}) {
     closeSheet(sheet); refresh();
   };
   bindSheetButtons(async () => { await db.from("items").delete().eq("id", item.id); });
+  enhancePickers(form);
   openSheet(sheet);
 }
 
@@ -617,29 +635,29 @@ function openRoutineSheet(r = {}) {
   r = r ?? {};
   const rt = { category: "sonstiges", days: [1, 2, 3, 4, 5, 6, 7], active: true, ...r };
   let days = [...rt.days];
-  form.innerHTML = `<h3>${r.id ? "Routine bearbeiten" : "Neue Routine"}</h3>
-    <input name="title" placeholder="Was?" required value="${esc(rt.title)}">
+  form.innerHTML = `<h3>${t(r.id ? "Routine bearbeiten" : "Neue Routine")}</h3>
+    <input name="title" placeholder="${t("Was?")}" required value="${esc(rt.title)}">
     <div class="row">
-      <div><label>Bereich</label><select name="category">${Object.entries(CATEGORIES).map(([k, v]) => `<option value="${k}" ${rt.category === k ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+      <div><label>${t("Bereich")}</label><select name="category">${Object.entries(CATEGORIES).map(([k, v]) => `<option value="${k}" ${rt.category === k ? "selected" : ""}>${v}</option>`).join("")}</select></div>
     </div>
-    ${rt.prayer ? `<p class="small muted">Die Uhrzeit kommt automatisch aus den Gebetszeiten.</p>` : `
-    <label>Zeitpunkt</label>
+    ${rt.prayer ? `<p class="small muted">${t("Die Uhrzeit kommt automatisch aus den Gebetszeiten.")}</p>` : `
+    <label>${t("Zeitpunkt")}</label>
     <select name="anchor">
-      <option value="">Feste Uhrzeit</option>
-      ${Object.entries(PRAYER_NAMES).map(([k, v]) => `<option value="${k}" ${rt.anchor_prayer === k ? "selected" : ""}>Nach ${v}</option>`).join("")}
+      <option value="">${t("Feste Uhrzeit")}</option>
+      ${Object.entries(PRAYER_NAMES).map(([k, v]) => `<option value="${k}" ${rt.anchor_prayer === k ? "selected" : ""}>${t("Nach {x}", { x: v })}</option>`).join("")}
     </select>
     <div class="row">
-      <div id="fix-time" ${rt.anchor_prayer ? "hidden" : ""}><label>Uhrzeit</label><input name="at_time" type="time" value="${hhmm(rt.at_time)}"></div>
-      <div id="anchor-off" ${rt.anchor_prayer ? "" : "hidden"}><label>Minuten danach</label><input name="anchor_offset" type="number" min="0" max="240" step="5" value="${rt.anchor_offset ?? 15}"></div>
+      <div id="fix-time" ${rt.anchor_prayer ? "hidden" : ""}><label>${t("Uhrzeit")}</label><input name="at_time" type="time" value="${hhmm(rt.at_time)}"></div>
+      <div id="anchor-off" ${rt.anchor_prayer ? "" : "hidden"}><label>${t("Minuten danach")}</label><input name="anchor_offset" type="number" min="0" max="240" step="5" value="${rt.anchor_offset ?? 15}"></div>
     </div>`}
     ${prioSeg(rt.priority)}
-    <label>Wiederholen an</label>
+    <label>${t("Wiederholen an")}</label>
     <div class="seg" id="days-seg">${DAY_SHORT.map((d, i) => `<button type="button" data-d="${i + 1}" class="${days.includes(i + 1) ? "on" : ""}">${d}</button>`).join("")}</div>
-    <label>Notiz</label><textarea name="notes" rows="2">${esc(rt.notes)}</textarea>
-    <label class="switch">Aktiv<input type="checkbox" name="active" ${rt.active ? "checked" : ""}></label>
-    <div class="sheet-actions"><button class="primary" value="save">Speichern</button></div>
-    ${r.id ? `<button type="button" class="ghost danger" id="del">Löschen</button>` : ""}
-    <button type="button" class="ghost" id="cancel">Abbrechen</button>`;
+    <label>${t("Notiz")}</label><textarea name="notes" rows="2">${esc(rt.notes)}</textarea>
+    <label class="switch">${t("Aktiv")}<input type="checkbox" name="active" ${rt.active ? "checked" : ""}></label>
+    <div class="sheet-actions"><button class="primary" value="save">${t("Speichern")}</button></div>
+    ${r.id ? `<button type="button" class="ghost danger" id="del">${t("Löschen")}</button>` : ""}
+    <button type="button" class="ghost" id="cancel">${t("Abbrechen")}</button>`;
   const getPrio = bindPrio(rt.priority);
   const anchorSel = form.querySelector('[name="anchor"]');
   if (anchorSel) anchorSel.onchange = () => {
@@ -653,7 +671,7 @@ function openRoutineSheet(r = {}) {
   }));
   form.onsubmit = async (e) => {
     e.preventDefault();
-    if (!days.length) return toast("Mindestens einen Tag wählen");
+    if (!days.length) return toast(t("Mindestens einen Tag wählen"));
     const f = new FormData(form);
     const row = { title: f.get("title").trim(), category: f.get("category"), days, notes: f.get("notes").trim() || null, active: f.get("active") === "on", priority: getPrio() };
     if (!rt.prayer) {
@@ -666,13 +684,91 @@ function openRoutineSheet(r = {}) {
     closeSheet(sheet); refresh();
   };
   bindSheetButtons(async () => { await db.from("routines").delete().eq("id", r.id); });
+  enhancePickers(form);
   openSheet(sheet);
+}
+
+// ---------- Eigene Datums- und Uhrzeitauswahl ----------
+// Ersetzt input[type=date|time] durch einen Knopf; der Wert bleibt in einem versteckten Feld mit gleichem Namen.
+const picker = $("#picker"), pbody = $("#picker-body");
+const fmtPick = (input) => input.dataset.kind === "date"
+  ? fmtDay(input.value, { weekday: "short", day: "numeric", month: "long", year: input.value.slice(0, 4) === String(new Date().getFullYear()) ? undefined : "numeric" })
+  : input.value || "–:–";
+
+function enhancePickers(root) {
+  root.querySelectorAll('input[type="date"], input[type="time"]').forEach((input) => {
+    input.dataset.kind = input.type;
+    input.type = "hidden";
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = `pick pick-${input.dataset.kind}`;
+    const paint = () => { b.textContent = fmtPick(input); b.classList.toggle("empty", !input.value); };
+    paint();
+    b.onclick = () => (input.dataset.kind === "date" ? pickDate : pickTime)(input, paint);
+    input.after(b);
+  });
+}
+
+function pickDate(input, done) {
+  const today = new Date();
+  let view = new Date((input.value || isoDate(today)) + "T12:00");
+  view.setDate(1);
+  const set = (iso) => { input.value = iso; done(); closeSheet(picker); };
+  const draw = () => {
+    const first = (view.getDay() + 6) % 7;
+    const days = new Date(view.getFullYear(), view.getMonth() + 1, 0).getDate();
+    let cells = "";
+    for (let k = 0; k < first; k++) cells += `<span></span>`;
+    for (let d = 1; d <= days; d++) {
+      const iso = isoDate(new Date(view.getFullYear(), view.getMonth(), d));
+      cells += `<button type="button" data-iso="${iso}" class="${iso === input.value ? "sel" : ""} ${iso === isoDate(today) ? "today" : ""}">${d}</button>`;
+    }
+    const quick = [["Heute", 0], ["Morgen", 1], ["Übermorgen", 2], ["Nächste Woche", 7]];
+    pbody.innerHTML = `<h3>${t("Datum wählen")}</h3>
+      <div class="chips quick">${quick.map(([n, k]) => `<button type="button" class="chip" data-iso="${isoDate(addDays(today, k))}">${t(n)}</button>`).join("")}</div>
+      <div class="cal-head">
+        <button type="button" class="cal-nav" data-m="-1" aria-label="‹">‹</button>
+        <b>${view.toLocaleDateString(LOCALE(), { month: "long", year: "numeric" })}</b>
+        <button type="button" class="cal-nav" data-m="1" aria-label="›">›</button>
+      </div>
+      <div class="cal">${DAY_SHORT.map((d) => `<i>${d}</i>`).join("")}${cells}</div>`;
+    pbody.querySelectorAll("[data-iso]").forEach((b) => (b.onclick = () => set(b.dataset.iso)));
+    pbody.querySelectorAll("[data-m]").forEach((b) => (b.onclick = () => { view.setMonth(view.getMonth() + Number(b.dataset.m)); draw(); }));
+  };
+  draw();
+  openSheet(picker);
+}
+
+function pickTime(input, done) {
+  let [h, m] = input.value ? input.value.split(":").map(Number) : [null, null];
+  const now = new Date();
+  const soon = `${String((now.getHours() + 1) % 24).padStart(2, "0")}:00`;
+  const draw = () => {
+    pbody.innerHTML = `<h3>${t("Uhrzeit wählen")}</h3>
+      <div class="chips quick">${[soon, "08:00", "12:00", "18:00", "20:00"].filter((v, i, a) => a.indexOf(v) === i)
+        .map((v) => `<button type="button" class="chip" data-v="${v}">${v}</button>`).join("")}</div>
+      <label>${t("Stunde")}</label>
+      <div class="grid-pick">${Array.from({ length: 24 }, (_, k) => `<button type="button" data-h="${k}" class="${k === h ? "sel" : ""}">${String(k).padStart(2, "0")}</button>`).join("")}</div>
+      <label>${t("Minute")}</label>
+      <div class="grid-pick">${Array.from({ length: 12 }, (_, k) => k * 5).map((k) => `<button type="button" data-min="${k}" class="${k === m ? "sel" : ""}">:${String(k).padStart(2, "0")}</button>`).join("")}</div>
+      <div class="pick-time-show">${h == null ? "–:–" : `${String(h).padStart(2, "0")}:${String(m ?? 0).padStart(2, "0")}`}</div>
+      <div class="sheet-actions"><button type="button" class="primary" id="pt-ok" ${h == null ? "disabled" : ""}>${t("Übernehmen")}</button></div>
+      ${input.required ? "" : `<button type="button" class="ghost" id="pt-clear">${t("Keine Uhrzeit")}</button>`}`;
+    pbody.querySelectorAll("[data-v]").forEach((b) => (b.onclick = () => { input.value = b.dataset.v; done(); closeSheet(picker); }));
+    pbody.querySelectorAll("[data-h]").forEach((b) => (b.onclick = () => { h = Number(b.dataset.h); m ??= 0; draw(); }));
+    pbody.querySelectorAll("[data-min]").forEach((b) => (b.onclick = () => { m = Number(b.dataset.min); h ??= now.getHours(); draw(); }));
+    $("#pt-ok").onclick = () => { input.value = `${String(h).padStart(2, "0")}:${String(m ?? 0).padStart(2, "0")}`; done(); closeSheet(picker); };
+    const clear = $("#pt-clear");
+    if (clear) clear.onclick = () => { input.value = ""; done(); closeSheet(picker); };
+  };
+  draw();
+  openSheet(picker);
 }
 
 function bindSheetButtons(onDelete) {
   form.querySelector("#cancel").onclick = () => closeSheet(sheet);
   const del = form.querySelector("#del");
-  if (del) del.onclick = async () => { if (confirm("Wirklich löschen?")) { await onDelete(); closeSheet(sheet); refresh(); } };
+  if (del) del.onclick = async () => { if (confirm(t("Wirklich löschen?"))) { await onDelete(); closeSheet(sheet); refresh(); } };
 }
 
 // ---------- Sprache ----------
@@ -694,13 +790,13 @@ $("#cmd-input").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e
 
 function startListening() {
   if (!Recognition) {
-    $("#voice-state").textContent = "Tipp ins Feld und nutze das Mikro deiner Tastatur.";
+    $("#voice-state").textContent = t("Tipp ins Feld und nutze das Mikro deiner Tastatur.");
     $("#cmd-input").focus();
     return;
   }
   try {
     rec = new Recognition();
-    rec.lang = "de-DE";
+    rec.lang = LOCALE();
     rec.interimResults = true;
     rec.onresult = (e) => {
       const r = e.results[e.results.length - 1];
@@ -709,26 +805,33 @@ function startListening() {
       if (r.isFinal) { stopListening(); setTimeout(() => $("#cmd-form").requestSubmit(), 700); }
     };
     rec.onerror = (e) => {
-      if (e.error === "no-speech") $("#voice-state").textContent = "Nichts gehört. Nochmal tippen.";
-      else if (e.error !== "aborted") { $("#voice-state").textContent = "Mikro hier nicht verfügbar. Nutze das Mikro deiner Tastatur."; $("#cmd-input").focus(); }
+      if (e.error === "no-speech") $("#voice-state").textContent = t("Nichts gehört. Nochmal tippen.");
+      else if (e.error !== "aborted") { $("#voice-state").textContent = t("Mikro hier nicht verfügbar. Nutze das Mikro deiner Tastatur."); $("#cmd-input").focus(); }
     };
-    rec.onend = () => { rec = null; $("#voice-orb").classList.remove("listening"); if ($("#voice-state").textContent === "Ich höre zu …") $("#voice-state").textContent = "Tippe zum Sprechen"; };
+    rec.onend = () => { rec = null; $("#voice-orb").classList.remove("listening"); if ($("#voice-state").textContent === t("Ich höre zu …")) $("#voice-state").textContent = t("Tippe zum Sprechen"); };
     rec.start();
     $("#voice-orb").classList.add("listening");
-    $("#voice-state").textContent = "Ich höre zu …";
+    $("#voice-state").textContent = t("Ich höre zu …");
   } catch { rec = null; }
 }
 function stopListening() { if (rec) rec.stop(); }
+
+// Türkisch zuerst, deutsche Befehle klappen trotzdem
+function parseCmd(text, now, cands) {
+  if (LANG !== "tr") return parse(text, now, cands);
+  const r = parseTr(text, now, cands);
+  return r.type === "unbekannt" ? parse(text, now, cands) : r;
+}
 
 function candidates() {
   return [...state.entries.filter((e) => !e.done), ...state.open, ...state.entries.filter((e) => e.done)];
 }
 
 function describe(cmd) {
-  if (cmd.type === "erledigt") return ["Abhaken", cmd.match.title];
-  if (cmd.type === "routine") return ["Neue Routine", `${cmd.title} · ${cmd.days.length === 7 ? "täglich" : cmd.days.map((d) => DAY_SHORT[d - 1]).join(", ")}${cmd.time ? " · " + cmd.time : ""}`];
-  if (cmd.type === "termin") return ["Termin", `${cmd.title} · ${fmtDay(cmd.date)}${cmd.time ? " · " + cmd.time : ""}${cmd.end ? "–" + cmd.end : ""}`];
-  if (cmd.type === "aufgabe") return ["Aufgabe", `${cmd.title} · fällig ${fmtDay(cmd.date)}${cmd.time ? " · " + cmd.time : ""}`];
+  if (cmd.type === "erledigt") return [t("Abhaken"), cmd.match.title];
+  if (cmd.type === "routine") return [t("Neue Routine"), `${cmd.title} · ${cmd.days.length === 7 ? t("täglich") : cmd.days.map((d) => DAY_SHORT[d - 1]).join(", ")}${cmd.time ? " · " + cmd.time : ""}`];
+  if (cmd.type === "termin") return [t("Termin"), `${cmd.title} · ${fmtDay(cmd.date)}${cmd.time ? " · " + cmd.time : ""}${cmd.end ? "–" + cmd.end : ""}`];
+  if (cmd.type === "aufgabe") return [t("Aufgabe"), `${cmd.title} · ${t("fällig {d}", { d: fmtDay(cmd.date) })}${cmd.time ? " · " + cmd.time : ""}`];
   return null;
 }
 
@@ -736,7 +839,7 @@ function showPreview() {
   const v = $("#cmd-input").value.trim();
   const p = $("#preview");
   if (!v) { p.hidden = true; return; }
-  const d = describe(parse(v, new Date(), candidates()));
+  const d = describe(parseCmd(v, new Date(), candidates()));
   p.hidden = !d;
   if (d) p.innerHTML = `<b>${d[0]}</b>${esc(d[1])}`;
 }
@@ -750,14 +853,14 @@ $("#cmd-form").onsubmit = async (e) => {
 };
 
 async function runCommand(text) {
-  const cmd = parse(text, new Date(), candidates());
+  const cmd = parseCmd(text, new Date(), candidates());
 
   if (cmd.type === "erledigt") {
     const e = cmd.match;
     const date = e.kind === "routine" ? isoDate(state.day) : null;
     if (e.kind === "routine") await setRoutineDone(e.id, true, date);
     else await db.from("items").update({ done: true }).eq("id", e.id);
-    toast(`Abgehakt: ${e.title}`, async () => {
+    toast(t("Abgehakt: {x}", { x: e.title }), async () => {
       if (e.kind === "routine") await setRoutineDone(e.id, false, date);
       else await db.from("items").update({ done: false }).eq("id", e.id);
       refresh();
@@ -765,12 +868,12 @@ async function runCommand(text) {
   } else if (cmd.type === "routine") {
     const { data, error } = await db.from("routines").insert({ title: cmd.title, days: cmd.days, at_time: cmd.time, category: cmd.category }).select().single();
     if (error) return toast(error.message);
-    toast(`Routine angelegt: ${cmd.title}`, async () => { await db.from("routines").delete().eq("id", data.id); refresh(); });
+    toast(t("Routine angelegt: {x}", { x: cmd.title }), async () => { await db.from("routines").delete().eq("id", data.id); refresh(); });
   } else if (cmd.type === "termin" || cmd.type === "aufgabe") {
     const row = { kind: cmd.type, title: cmd.title, on_date: cmd.date, start_time: cmd.time, end_time: cmd.end };
     const { data, error } = await db.from("items").insert(row).select().single();
     if (error) return toast(error.message);
-    toast(`${cmd.type === "termin" ? "Termin" : "Aufgabe"}: ${cmd.title}, ${fmtDay(cmd.date)}${cmd.time ? " " + cmd.time : ""}`, async () => {
+    toast(`${t(cmd.type === "termin" ? "Termin" : "Aufgabe")}: ${cmd.title}, ${fmtDay(cmd.date)}${cmd.time ? " " + cmd.time : ""}`, async () => {
       await db.from("items").delete().eq("id", data.id);
       refresh();
     });
@@ -789,14 +892,14 @@ document.addEventListener("click", (e) => {
   const show = input.type === "password";
   input.type = show ? "text" : "password";
   b.classList.toggle("on", show);
-  b.setAttribute("aria-label", show ? "Passwort verbergen" : "Passwort anzeigen");
+  b.setAttribute("aria-label", t(show ? "Passwort verbergen" : "Passwort anzeigen"));
 });
 
 // ---------- Hinweis ----------
 let toastTimer;
 function toast(msg, undo) {
   const el = $("#toast");
-  el.innerHTML = `<span>${esc(msg)}</span>${undo ? `<button>Rückgängig</button>` : ""}`;
+  el.innerHTML = `<span>${esc(msg)}</span>${undo ? `<button>${t("Rückgängig")}</button>` : ""}`;
   el.hidden = false;
   if (undo) el.querySelector("button").onclick = () => { el.hidden = true; undo(); };
   clearTimeout(toastTimer);
@@ -805,4 +908,6 @@ function toast(msg, undo) {
 
 document.addEventListener("visibilitychange", () => { if (!document.hidden && state.user) refresh(); });
 
+translateStatic();
+document.documentElement.lang = LANG;
 boot();
