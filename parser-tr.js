@@ -20,6 +20,8 @@ const TERMIN_RE = stems(["randevu", "toplantı", "görüşme", "buluşma"]);
 const AUFGABE_RE = stems(["görev", "yapılacak", "hatırlat", "unutma", "lazım", "gerek"]);
 const ROUTINE_RE = stems(["rutin", "alışkanlık"]);
 const KADAR_RE = rx("kadar");
+const LOC_RE = new RegExp(B + "(?:yer|yeri|adres|adresi|konum|konumu)(?:\\s+olarak|\\s*:)?\\s+(.+)$", "iu");
+const cleanLoc = (x) => { const v = x.replace(/\s+/g, " ").trim(); return v ? v.charAt(0).toLocaleUpperCase("tr-TR") + v.slice(1) : null; };
 
 const FILLER = ["lütfen", "ekle", "oluştur", "kaydet", "yeni", "bir", "için", "ve", "beni", "bana", "olarak", "saat", "ile", "de", "da",
   "planla", "yapmam", "yapmalıyım", "yapmalı", "bitmeli", "bitmesi", "bitsin", "gerekiyor", "olmalı", "olsun", "kadar", "her", "ekler", "misin", "mısın"];
@@ -163,12 +165,16 @@ export function parseTr(text, now = new Date(), candidates = []) {
   const deadline = !t.end && KADAR_RE.test(rest);
   const d = parseDate(rest, now);
   if (d.hit) rest = rest.replace(d.hit, " ");
+  // "… yer Müller muayenehanesi": alles nach yer/adres ist der Ort
+  let location = null;
+  const lm = rest.match(LOC_RE);
+  if (lm) { location = cleanLoc(lm[1]); rest = rest.slice(0, lm.index); }
   // "Cumartesi 14'ten 16'ya kadar toplantı": Titel ist dann das Wort Toplantı selbst
   const title = cleanTitle(rest) || (isTermin ? ((w) => w.charAt(0).toLocaleUpperCase("tr-TR") + w.slice(1))(s.match(TERMIN_RE)[0].replace(/'.*/, "")) : "");
 
   if (!title) return { type: "unbekannt", text };
-  const type = isTermin ? "termin" : isAufgabe || deadline ? "aufgabe" : t.time ? "termin" : "aufgabe";
-  return { type, title, date: isoDate(d.date), time: t.time, end: t.end ?? null };
+  const type = isTermin || location ? "termin" : isAufgabe || deadline ? "aufgabe" : t.time ? "termin" : "aufgabe";
+  return { type, title, date: isoDate(d.date), time: t.time, end: t.end ?? null, location };
 }
 
 export { parseDate as parseDateTr, parseTime as parseTimeTr, findPrayer };

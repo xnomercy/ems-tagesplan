@@ -7,7 +7,7 @@ const SUPABASE_URL = "https://hpxdhtuabzqwyslzcmbt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kKiQdntJd893YvBPFx7fhw_FYzlwwtz";
 const DEMO = new URLSearchParams(location.search).has("demo");
 // Bei jeder Veröffentlichung zusammen mit version.json und dem Cache-Namen in sw.js hochzählen
-const APP_VERSION = "11";
+const APP_VERSION = "12";
 const db = DEMO
   ? (await import("./mock.js")).db
   : (await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm")).createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -901,7 +901,7 @@ function describe(cmd) {
     const d = describe({ ...cmd, title: extractPrio(cmd.title).title });
     return [d[0], d[1] + " · " + t("Wichtig")];
   }
-  if (cmd.type === "termin") return [t("Termin"), `${cmd.title} · ${fmtDay(cmd.date)}${cmd.time ? " · " + cmd.time : ""}${cmd.end ? "–" + cmd.end : ""}`];
+  if (cmd.type === "termin") return [t("Termin"), `${cmd.title} · ${fmtDay(cmd.date)}${cmd.time ? " · " + cmd.time : ""}${cmd.end ? "–" + cmd.end : ""}${cmd.location ? " · " + cmd.location : ""}`];
   if (cmd.type === "aufgabe") return [t("Aufgabe"), `${cmd.title} · ${t("fällig {d}", { d: fmtDay(cmd.date) })}${cmd.time ? " · " + cmd.time : ""}`];
   return null;
 }
@@ -947,7 +947,7 @@ async function runCommand(text) {
     // "… wichtig" macht den Eintrag gleich zu hoher Priorität
     const p = extractPrio(cmd.title);
     cmd.title = p.title;
-    const row = { kind: cmd.type, title: cmd.title, on_date: cmd.date, start_time: cmd.time, end_time: cmd.end, priority: p.priority ?? "normal" };
+    const row = { kind: cmd.type, title: cmd.title, on_date: cmd.date, start_time: cmd.time, end_time: cmd.end, priority: p.priority ?? "normal", location: cmd.location ?? null };
     const { data, error } = await db.from("items").insert(row).select().single();
     if (error) return toast(error.message);
     toast(`${t(cmd.type === "termin" ? "Termin" : "Aufgabe")}: ${cmd.title}, ${fmtDay(cmd.date)}${cmd.time ? " " + cmd.time : ""}`, async () => {
@@ -1090,14 +1090,14 @@ async function deleteEntry(kind, id) {
 // Hilfe: was die Sprachsteuerung versteht, mit Beispielen zum Antippen
 const HELP = {
   de: [
-    ["Anlegen", ["Termin morgen um 15 Uhr Zahnarzt", "Aufgabe Steuer bis Freitag, wichtig", "Täglich um 21 Uhr Buch lesen"]],
+    ["Anlegen", ["Termin am 20.10. um 14 Uhr Zahnarzt Ort Praxis Müller Neuwied", "Aufgabe Steuer bis Freitag, wichtig", "Täglich um 21 Uhr Buch lesen"]],
     ["Abhaken", ["Asr erledigt", "Asr doch nicht erledigt"]],
     ["Ändern", ["Verschiebe Zahnarzt auf Freitag um 10", "Mach Steuer wichtig", "Pausiere Retinol", "Erinnere mich 30 Minuten vorher an Zahnarzt", "Füge Milch zur Einkaufsliste hinzu", "Lösche den Termin Zahnarzt"]],
     ["Anzeigen", ["Was steht morgen an", "Zeig mir die Termine", "Teile die Routinen nach Tageszeit auf", "Öffne die Einstellungen"]],
     ["Sprache", ["Sprich Türkisch"]],
   ],
   tr: [
-    ["Ekle", ["Yarın saat 15'te diş doktoru randevusu", "Vergi görevi cumaya kadar, önemli", "Her gün saat 21'de kitap oku"]],
+    ["Ekle", ["Yarın saat 15'te diş doktoru randevusu yer Müller muayenehanesi", "Vergi görevi cumaya kadar, önemli", "Her gün saat 21'de kitap oku"]],
     ["İşaretle", ["İkindiyi kıldım", "İkindiyi kılmadım"]],
     ["Değiştir", ["Diş doktorunu cumaya ertele", "Vergi önemli", "Retinol'ü durdur", "Diş doktoru için 1 saat önce hatırlat", "Alışveriş listesine süt ekle", "Diş doktoru randevusunu sil"]],
     ["Göster", ["Yarın neler var", "Randevuları göster", "Rutinleri vakte göre sırala", "Ayarları aç"]],

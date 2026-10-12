@@ -34,7 +34,10 @@ const CATEGORY_WORDS = {
 };
 const FILLER_RE = new RegExp(B + "(?:" + ["neuer", "neue", "neues", "einen", "eine", "ein", "trag", "trage", "eintragen", "plane", "planen", "bitte",
   "hinzufügen", "füge", "hinzu", "an", "am", "um", "für", "ist", "habe", "hab", "ich", "mich", "dass", "uhr", "leg", "lege", "anlegen",
-  "fertig", "sein", "erledigt", "einmalig", "einmal", "dann", "neu", "routine", "gewohnheit", "jeden", "jede", "jeder", "immer", "mal", "und", "so", "zum", "zur", "das", "die", "den", "der"].join("|") + ")" + E, "giu");
+  "fertig", "sein", "mach", "mache", "machen", "neuen", "erstelle", "erstellen", "erledigt", "einmalig", "einmal", "dann", "neu", "routine", "gewohnheit", "jeden", "jede", "jeder", "immer", "mal", "und", "so", "zum", "zur", "das", "die", "den", "der"].join("|") + ")" + E, "giu");
+
+const LOC_RE = new RegExp(B + "(?:ort|adresse|treffpunkt|location)(?:\\s+ist|\\s*:)?\\s+(.+)$", "iu");
+export const cleanLoc = (x) => { const v = x.replace(/^(?:ist|in|im|bei|beim)\s+/iu, "").replace(/\s+/g, " ").trim(); return v ? v.charAt(0).toUpperCase() + v.slice(1) : null; };
 
 const pad = (n) => String(n).padStart(2, "0");
 export const isoDate = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -179,9 +182,13 @@ export function parse(text, now = new Date(), candidates = []) {
   if (d.hit) rest = rest.replace(d.hit, " ");
   const t = parseTime(rest);
   if (t.hit) rest = rest.replace(t.hit, " ");
+  // "… Ort Praxis Müller, Neuwied": alles nach dem Wort Ort ist der Ort
+  let location = null;
+  const lm = rest.match(LOC_RE);
+  if (lm) { location = cleanLoc(lm[1]); rest = rest.slice(0, lm.index); }
   const title = cleanTitle(rest);
 
   if (!title) return { type: "unbekannt", text };
-  const type = isTermin ? "termin" : isAufgabe || deadline ? "aufgabe" : t.time ? "termin" : "aufgabe";
-  return { type, title, date: isoDate(d.date), time: t.time, end: t.end ?? null };
+  const type = isTermin || location ? "termin" : isAufgabe || deadline ? "aufgabe" : t.time ? "termin" : "aufgabe";
+  return { type, title, date: isoDate(d.date), time: t.time, end: t.end ?? null, location };
 }
