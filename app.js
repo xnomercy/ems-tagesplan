@@ -27,17 +27,22 @@ const DEFAULT_ROUTINES = [
   { title: "Asr", category: "gebet", prayer: "asr" },
   { title: "Maghrib", category: "gebet", prayer: "maghrib" },
   { title: "Isha", category: "gebet", prayer: "isha" },
-  { title: "Wall Angels 2×10", category: "training", at_time: "07:45" },
-  { title: "Morgen-Supps zum Frühstück", category: "supps", at_time: "07:55", notes: "D3+K2, Schwarzkümmelöl, Vitamin C, B12, Lion's Mane, OPC, Bor" },
-  { title: "Morgenpflege", category: "pflege", at_time: "08:05" },
-  { title: "Mittag-Supps", category: "supps", at_time: "12:55", notes: "Chlorella + Gerstengras" },
-  { title: "Krafttraining + 10 Min Stepper", category: "training", days: [1, 3, 5] },
-  { title: "Scalp-Öl-Massage", category: "pflege", at_time: "20:30", days: [1, 4] },
-  { title: "Abendpflege", category: "pflege", at_time: "20:40" },
-  { title: "Dermastamping Bart", category: "pflege", at_time: "21:00", days: [2, 5] },
+  { title: "Wall Angels 2×10", category: "training", at_time: "07:30" },
+  { title: "Morgenpflege", category: "pflege", at_time: "07:40", notes: "Gesicht waschen, Urea-Cica-Creme oder Nivea Soft, SPF falls vorhanden" },
+  { title: "Frühstück + Morgen-Supps", category: "supps", at_time: "07:50", notes: "D3+K2, Schwarzkümmelöl, liposomales Vitamin C, B12, Lion's Mane, OPC, Bor. Zum Essen." },
+  { title: "Mittagessen + Mittag-Supps", category: "supps", anchor_prayer: "dhuhr", anchor_offset: 15, notes: "Chlorella + Gerstengras, getrennt von Mineralien" },
+  { title: "Krafttraining + 10 Min Stepper", category: "training", days: [1, 3, 5], notes: "Zeit frei wählbar, z. B. nach Asr" },
+  { title: "Einkauf für Meal-Prep", category: "essen", days: [6], notes: "Halal-Fleisch beim türkischen Markt, Rest Rewe/Lidl" },
+  { title: "Meal-Prep", category: "essen", anchor_prayer: "dhuhr", anchor_offset: 30, days: [7] },
+  { title: "Abendessen kochen", category: "essen", at_time: "17:30", days: [2, 4] },
+  { title: "Scalp-Öl-Massage", category: "pflege", at_time: "20:30", days: [1, 4], notes: "½ TL Jojoba + ½ TL Mandel + ¼ TL Rizinus + 3 Tropfen Rosmarin. 30-60 Min einwirken, 2x shampoonieren." },
+  { title: "Abendpflege", category: "pflege", at_time: "20:45", notes: "Reinigen, Creme + Öl" },
+  { title: "Retinol", category: "pflege", at_time: "20:50", days: [1, 3, 6], notes: "Nicht am selben Abend wie Säure oder Stamping" },
+  { title: "Pore Pad + Maske", category: "pflege", at_time: "20:50", days: [4, 7] },
+  { title: "Dermastamping Bart (0,5 mm)", category: "pflege", at_time: "21:00", days: [2, 5] },
   { title: "Buch lesen (20 Min)", category: "lesen", at_time: "21:10" },
   { title: "Trockene Kopfhautmassage", category: "pflege", at_time: "21:30" },
-  { title: "Abend-Supps", category: "supps", at_time: "21:55", notes: "Magnesium + Ashwagandha" },
+  { title: "Abend-Supps", category: "supps", at_time: "21:55", notes: "Magnesium + Ashwagandha, 30-60 Min vor dem Schlafen" },
 ];
 
 // ---------- Anmeldung ----------
@@ -83,12 +88,16 @@ async function ensureSetup() {
   const { data: created } = await db.from("settings").insert({}).select().single();
   state.settings = created;
   const { count } = await db.from("routines").select("id", { count: "exact", head: true });
-  if (!count) await db.from("routines").insert(DEFAULT_ROUTINES);
+  // Alle Zeilen brauchen dieselben Spalten, sonst landen fehlende als NULL statt Standardwert
+  if (!count) await db.from("routines").insert(DEFAULT_ROUTINES.map((r) => ({
+    prayer: null, at_time: null, anchor_prayer: null, anchor_offset: 15, notes: null, days: [1, 2, 3, 4, 5, 6, 7], ...r,
+  })));
 }
 
 // ---------- Daten ----------
 async function prayerTimes(date) {
   const s = state.settings;
+  if (DEMO) return { Fajr: "05:58", Dhuhr: "13:21", Asr: "16:19", Maghrib: "18:41", Isha: "20:13" };
   if (!s || s.lat == null) return null;
   const key = `pt:${isoDate(date)}:${s.lat.toFixed(2)}:${s.lng.toFixed(2)}:${s.prayer_method}`;
   try { const c = localStorage.getItem(key); if (c) return JSON.parse(c); } catch {}
@@ -121,7 +130,7 @@ async function refresh() {
   const entries = [];
   for (const rt of state.routines) {
     if (!rt.active || !rt.days.includes(wd)) continue;
-    const time = rt.prayer ? (pt ? pt[PRAYER_API[rt.prayer]].slice(0, 5) : null) : hhmm(rt.at_time) || null;
+    const time = routineTime(rt, pt);
     entries.push({ kind: "routine", id: rt.id, title: rt.title, time, done: done.has(rt.id), category: rt.category, notes: rt.notes, prayer: rt.prayer });
   }
   for (const it of i.data ?? []) {
@@ -134,6 +143,20 @@ async function refresh() {
     : [];
   render();
 }
+
+// Uhrzeit einer Routine: Gebetszeit, an ein Gebet gekoppelt oder fest
+const PRAYER_NAMES = { fajr: "Fajr", dhuhr: "Dhuhr", asr: "Asr", maghrib: "Maghrib", isha: "Isha" };
+function routineTime(rt, pt) {
+  if (rt.prayer) return pt ? pt[PRAYER_API[rt.prayer]].slice(0, 5) : null;
+  if (rt.anchor_prayer) {
+    if (!pt) return null;
+    const [h, m] = pt[PRAYER_API[rt.anchor_prayer]].slice(0, 5).split(":").map(Number);
+    const t = Math.min(h * 60 + m + (rt.anchor_offset ?? 15), 23 * 60 + 59);
+    return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+  }
+  return hhmm(rt.at_time) || null;
+}
+const routineWhen = (r) => r.prayer ? "auto" : r.anchor_prayer ? `${PRAYER_NAMES[r.anchor_prayer]} +${r.anchor_offset}` : hhmm(r.at_time) || "–";
 
 // ---------- Anzeige ----------
 function render() {
@@ -221,7 +244,7 @@ function renderPlan() {
     if (!list) continue;
     html += `<p class="eyebrow" style="margin-top:18px">${CATEGORIES[cat]}</p>`;
     html += list.map((r) => `<button class="list-item ${r.active ? "" : "off"}" data-edit-routine="${r.id}">
-      <div class="tm">${r.prayer ? "auto" : hhmm(r.at_time) || "–"}</div>
+      <div class="tm">${routineWhen(r)}</div>
       <div class="body"><div class="title">${esc(r.title)}</div>
       <div class="sub">${r.days.length === 7 ? "täglich" : r.days.map((d) => DAY_SHORT[d - 1]).join(", ")}${r.notes ? " · " + esc(r.notes) : ""}</div></div>
       <span class="muted">›</span></button>`).join("");
@@ -405,9 +428,17 @@ function openRoutineSheet(r = {}) {
     <input name="title" placeholder="Was?" required value="${esc(rt.title)}">
     <div class="row">
       <div><label>Bereich</label><select name="category">${Object.entries(CATEGORIES).map(([k, v]) => `<option value="${k}" ${rt.category === k ? "selected" : ""}>${v}</option>`).join("")}</select></div>
-      <div><label>Uhrzeit</label><input name="at_time" type="time" value="${hhmm(rt.at_time)}" ${rt.prayer ? "disabled" : ""}></div>
     </div>
-    ${rt.prayer ? `<p class="small muted">Die Uhrzeit kommt automatisch aus den Gebetszeiten.</p>` : ""}
+    ${rt.prayer ? `<p class="small muted">Die Uhrzeit kommt automatisch aus den Gebetszeiten.</p>` : `
+    <label>Zeitpunkt</label>
+    <select name="anchor">
+      <option value="">Feste Uhrzeit</option>
+      ${Object.entries(PRAYER_NAMES).map(([k, v]) => `<option value="${k}" ${rt.anchor_prayer === k ? "selected" : ""}>Nach ${v}</option>`).join("")}
+    </select>
+    <div class="row">
+      <div id="fix-time" ${rt.anchor_prayer ? "hidden" : ""}><label>Uhrzeit</label><input name="at_time" type="time" value="${hhmm(rt.at_time)}"></div>
+      <div id="anchor-off" ${rt.anchor_prayer ? "" : "hidden"}><label>Minuten danach</label><input name="anchor_offset" type="number" min="0" max="240" step="5" value="${rt.anchor_offset ?? 15}"></div>
+    </div>`}
     <label>Wiederholen an</label>
     <div class="seg" id="days-seg">${DAY_SHORT.map((d, i) => `<button type="button" data-d="${i + 1}" class="${days.includes(i + 1) ? "on" : ""}">${d}</button>`).join("")}</div>
     <label>Notiz</label><textarea name="notes" rows="2">${esc(rt.notes)}</textarea>
@@ -415,6 +446,11 @@ function openRoutineSheet(r = {}) {
     <button class="primary" value="save">Speichern</button>
     ${r.id ? `<button type="button" class="ghost danger" id="del">Löschen</button>` : ""}
     <button type="button" class="ghost" id="cancel">Abbrechen</button>`;
+  const anchorSel = form.querySelector('[name="anchor"]');
+  if (anchorSel) anchorSel.onchange = () => {
+    $("#fix-time").hidden = !!anchorSel.value;
+    $("#anchor-off").hidden = !anchorSel.value;
+  };
   form.querySelectorAll("#days-seg button").forEach((b) => (b.onclick = () => {
     const d = Number(b.dataset.d);
     days = days.includes(d) ? days.filter((x) => x !== d) : [...days, d].sort();
@@ -425,7 +461,11 @@ function openRoutineSheet(r = {}) {
     if (!days.length) return toast("Mindestens einen Tag wählen");
     const f = new FormData(form);
     const row = { title: f.get("title").trim(), category: f.get("category"), days, notes: f.get("notes").trim() || null, active: f.get("active") === "on" };
-    if (!rt.prayer) row.at_time = f.get("at_time") || null;
+    if (!rt.prayer) {
+      row.anchor_prayer = f.get("anchor") || null;
+      row.anchor_offset = Number(f.get("anchor_offset") || 15);
+      row.at_time = row.anchor_prayer ? null : f.get("at_time") || null;
+    }
     const { error } = r.id ? await db.from("routines").update(row).eq("id", r.id) : await db.from("routines").insert(row);
     if (error) return toast(error.message);
     sheet.close(); refresh();

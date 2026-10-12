@@ -201,7 +201,7 @@ dialog label { display: block; font-size: 12px; font-weight: 700; color: var(--m
 .list-item .body { flex: 1; min-width: 0; }
 .list-item .title { font-weight: 700; }
 .list-item .sub { font-size: 13px; color: var(--muted); }
-.list-item .tm { font-weight: 800; color: var(--petrol); font-size: 14px; width: 48px; flex: none; }
+.list-item .tm { font-weight: 800; color: var(--petrol); font-size: 13px; width: 62px; flex: none; line-height: 1.25; }
 .list-item.off { opacity: .5; }
 .card { background: var(--card); border-radius: var(--radius); padding: 16px; margin-bottom: 10px; box-shadow: var(--shadow); }
 .card p { margin: 4px 0 8px; }

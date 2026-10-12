@@ -53,18 +53,18 @@ Deno.serve(async (req) => {
   const startDate = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
 
   for (const r of routines ?? []) {
-    if (r.prayer || !r.at_time) continue;
+    if (r.prayer || r.anchor_prayer || !r.at_time) continue;
     const byday = (r.days as number[]).map((d) => DAYS[d]).join(",");
     out.push(event(r.id, startDate, r.at_time, addMinutes(r.at_time, 15), r.title, r.notes, `FREQ=WEEKLY;BYDAY=${byday}`));
   }
 
   for (const i of items ?? []) {
     const end = i.end_time ?? addMinutes(i.start_time, 60);
-    out.push(event(i.id, i.on_date, i.start_time, end, i.kind === "aufgabe" ? `☐ ${i.title}` : i.title, i.notes));
+    out.push(event(i.id, i.on_date, i.start_time, end, i.kind === "aufgabe" ? `Aufgabe: ${i.title}` : i.title, i.notes));
   }
 
-  // Gebetszeiten für diesen und nächsten Monat
-  const prayers = (routines ?? []).filter((r) => r.prayer);
+  // Gebete und an Gebete gekoppelte Routinen: Zeiten pro Tag für diesen und nächsten Monat
+  const prayers = (routines ?? []).filter((r) => r.prayer || r.anchor_prayer);
   if (prayers.length && settings.lat != null && settings.lng != null) {
     const now = new Date();
     for (let k = 0; k < 2; k++) {
@@ -81,7 +81,8 @@ Deno.serve(async (req) => {
           const weekday = ((new Date(date).getUTCDay() + 6) % 7) + 1;
           for (const p of prayers) {
             if (!(p.days as number[]).includes(weekday)) continue;
-            const t = String(day.timings[PRAYER_KEY[p.prayer]]).slice(0, 5);
+            const base = String(day.timings[PRAYER_KEY[p.prayer ?? p.anchor_prayer]]).slice(0, 5);
+            const t = p.prayer ? base : addMinutes(base, p.anchor_offset ?? 15);
             out.push(event(`${p.id}-${date}`, date, t, addMinutes(t, 15), p.title, p.notes));
           }
         }
