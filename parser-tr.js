@@ -170,3 +170,5 @@ export function parseTr(text, now = new Date(), candidates = []) {
   const type = isTermin ? "termin" : isAufgabe || deadline ? "aufgabe" : t.time ? "termin" : "aufgabe";
   return { type, title, date: isoDate(d.date), time: t.time, end: t.end ?? null };
 }
+
+export { parseDate as parseDateTr, parseTime as parseTimeTr, findPrayer };

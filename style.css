@@ -347,3 +347,5 @@ button.pick.empty { color: var(--muted); font-weight: 400; }
   background: var(--petrol); color: #fff; font-weight: 700; box-shadow: 0 10px 30px rgba(7,31,38,.35); animation: sheet-up .3s ease; }
 #update span { flex: 1; }
 #update button { border: 0; border-radius: 12px; padding: 10px 14px; background: #fff; color: var(--petrol); font: inherit; font-weight: 800; }
+.help-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.help-list .chip { text-align: left; white-space: normal; }

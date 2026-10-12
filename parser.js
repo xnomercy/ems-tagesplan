@@ -47,7 +47,7 @@ function addDays(d, n) {
   return x;
 }
 
-function parseDate(s, now) {
+export function parseDate(s, now) {
   const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   let m;
   if ((m = s.match(rx("übermorgen")))) return { date: addDays(base, 2), hit: m[0] };
@@ -73,7 +73,7 @@ function parseDate(s, now) {
   return { date: base, hit: null };
 }
 
-function parseTime(s) {
+export function parseTime(s) {
   let m;
   const t = (h, min = 0) => `${pad(h % 24)}:${pad(min)}`;
   // "halb 8" ohne Zusatz meint meist abends

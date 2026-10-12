@@ -1,12 +1,13 @@
 import { parse, isoDate } from "./parser.js";
 import { parseTr } from "./parser-tr.js";
+import { parseIntent, extractPrio } from "./intents.js";
 import { t, LANG, LOCALE, setLang, translateStatic } from "./i18n.js";
 
 const SUPABASE_URL = "https://hpxdhtuabzqwyslzcmbt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kKiQdntJd893YvBPFx7fhw_FYzlwwtz";
 const DEMO = new URLSearchParams(location.search).has("demo");
 // Bei jeder Veröffentlichung zusammen mit version.json und dem Cache-Namen in sw.js hochzählen
-const APP_VERSION = "8";
+const APP_VERSION = "9";
 const db = DEMO
   ? (await import("./mock.js")).db
   : (await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm")).createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -800,11 +801,13 @@ const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, silenceTimer = null;
 
 $("#mic").onclick = () => {
+  loadUpcoming();
   $("#cmd-input").value = "";
   $("#preview").hidden = true;
   openSheet(voice);
   startListening();
 };
+$("#voice-help").onclick = () => { stopListening(); voice.close(); openHelp(); };
 $("#voice-close").onclick = () => { stopListening(); closeSheet(voice); };
 $("#voice-orb").onclick = () => (rec ? stopListening() : startListening());
 voice.querySelectorAll(".examples button").forEach((b) => (b.onclick = () => { $("#cmd-input").value = b.textContent; showPreview(); }));
@@ -862,9 +865,42 @@ function candidates() {
   return [...state.entries.filter((e) => !e.done), ...state.open, ...state.entries.filter((e) => e.done)];
 }
 
+// Alles, worauf sich ein Befehl beziehen kann: heutige Einträge, Routinen, kommende Termine und Aufgaben
+async function loadUpcoming() {
+  const { data } = await db.from("items").select("*")
+    .gte("on_date", isoDate(addDays(new Date(), -14))).lte("on_date", isoDate(addDays(new Date(), 120))).order("on_date");
+  state.upcoming = data ?? [];
+}
+function targets() {
+  const seen = new Set(), out = [];
+  const add = (e) => { if (!seen.has(e.id)) { seen.add(e.id); out.push(e); } };
+  [...state.entries, ...state.open].forEach(add);
+  (state.upcoming ?? []).forEach((i) => add({ kind: i.kind, id: i.id, title: i.title, done: i.done, raw: i, on_date: i.on_date, priority: i.priority }));
+  state.routines.forEach((r) => add({ kind: "routine", id: r.id, title: r.title, prayer: r.prayer, done: false, raw: r, priority: r.priority }));
+  return out;
+}
+const intentOf = (text) => parseIntent(text, new Date(), targets(), LANG);
+
 function describe(cmd) {
+  const x = cmd.target ? cmd.target.title : "";
+  if (cmd.type === "hilfe") return [t("Hilfe"), t("Zeigt, was du sagen kannst")];
+  if (cmd.type === "sprache") return [t("Sprache"), cmd.lang === "tr" ? "Türkçe" : "Deutsch"];
+  if (cmd.type === "gruppe") return [t("Routinen"), t(cmd.g === "zeit" ? "Nach Tageszeit" : "Nach Bereich")];
+  if (cmd.type === "zeige") return [t("Anzeigen"), cmd.date ? fmtDay(cmd.date, { weekday: "long", day: "numeric", month: "long" }) : t({ heute: "Tag", termine: "Termine", plan: "Routinen", mehr: "Einstellungen" }[cmd.view])];
+  if (cmd.type === "detail") return [t("Anzeigen"), x];
+  if (cmd.type === "loeschen") return [t("Löschen"), x];
+  if (cmd.type === "offen") return [t("Wieder öffnen"), x];
+  if (cmd.type === "verschieben") return [t("Verschieben"), `${x} → ${[cmd.date ? fmtDay(cmd.date) : "", cmd.time ?? ""].filter(Boolean).join(" · ")}`];
+  if (cmd.type === "pause") return [t(cmd.active ? "Aktivieren" : "Pausieren"), x];
+  if (cmd.type === "prio") return [t("Priorität"), `${x} · ${t(cmd.priority === "hoch" ? "Wichtig" : "Normal")}`];
+  if (cmd.type === "erinnerung") return [t("Erinnerung"), `${x} · ${cmd.minutes >= 60 ? t("{n} Std. vorher", { n: cmd.minutes / 60 }) : t("{n} Min. vorher", { n: cmd.minutes })}`];
+  if (cmd.type === "checkliste") return [t("Checkliste"), `${x} + ${cmd.item}`];
   if (cmd.type === "erledigt") return [t("Abhaken"), cmd.match.title];
   if (cmd.type === "routine") return [t("Neue Routine"), `${cmd.title} · ${cmd.days.length === 7 ? t("täglich") : cmd.days.map((d) => DAY_SHORT[d - 1]).join(", ")}${cmd.time ? " · " + cmd.time : ""}`];
+  if ((cmd.type === "termin" || cmd.type === "aufgabe") && extractPrio(cmd.title).priority) {
+    const d = describe({ ...cmd, title: extractPrio(cmd.title).title });
+    return [d[0], d[1] + " · " + t("Wichtig")];
+  }
   if (cmd.type === "termin") return [t("Termin"), `${cmd.title} · ${fmtDay(cmd.date)}${cmd.time ? " · " + cmd.time : ""}${cmd.end ? "–" + cmd.end : ""}`];
   if (cmd.type === "aufgabe") return [t("Aufgabe"), `${cmd.title} · ${t("fällig {d}", { d: fmtDay(cmd.date) })}${cmd.time ? " · " + cmd.time : ""}`];
   return null;
@@ -874,7 +910,7 @@ function showPreview() {
   const v = $("#cmd-input").value.trim();
   const p = $("#preview");
   if (!v) { p.hidden = true; return; }
-  const d = describe(parseCmd(v, new Date(), candidates()));
+  const d = describe(intentOf(v) ?? parseCmd(v, new Date(), candidates()));
   p.hidden = !d;
   if (d) p.innerHTML = `<b>${d[0]}</b>${esc(d[1])}`;
 }
@@ -888,14 +924,9 @@ $("#cmd-form").onsubmit = async (e) => {
 };
 
 async function runCommand(text) {
-  // "Teile die Routinen nach morgens, mittags, abends auf" -> Ansicht umstellen
-  if (/routin/i.test(text) && /(morgen|mittag|abend|tageszeit|sabah|öğle|akşam|vakit|bereich|kategorie|alan)/i.test(text) && /(teil|sortier|ordne|grupp|zeig|ayır|sırala|grupla|göster)/i.test(text)) {
-    const g = /(bereich|kategorie|alan)/i.test(text) ? "bereich" : "zeit";
-    setPlanGroup(g);
-    switchView("plan");
-    toast(t(g === "zeit" ? "Routinen nach Tageszeit sortiert" : "Routinen nach Bereich sortiert"));
-    return;
-  }
+  if (!state.upcoming) await loadUpcoming();
+  const intent = intentOf(text);
+  if (intent) return runIntent(intent);
   const cmd = parseCmd(text, new Date(), candidates());
 
   if (cmd.type === "erledigt") {
@@ -913,7 +944,10 @@ async function runCommand(text) {
     if (error) return toast(error.message);
     toast(t("Routine angelegt: {x}", { x: cmd.title }), async () => { await db.from("routines").delete().eq("id", data.id); refresh(); });
   } else if (cmd.type === "termin" || cmd.type === "aufgabe") {
-    const row = { kind: cmd.type, title: cmd.title, on_date: cmd.date, start_time: cmd.time, end_time: cmd.end };
+    // "… wichtig" macht den Eintrag gleich zu hoher Priorität
+    const p = extractPrio(cmd.title);
+    cmd.title = p.title;
+    const row = { kind: cmd.type, title: cmd.title, on_date: cmd.date, start_time: cmd.time, end_time: cmd.end, priority: p.priority ?? "normal" };
     const { data, error } = await db.from("items").insert(row).select().single();
     if (error) return toast(error.message);
     toast(`${t(cmd.type === "termin" ? "Termin" : "Aufgabe")}: ${cmd.title}, ${fmtDay(cmd.date)}${cmd.time ? " " + cmd.time : ""}`, async () => {
@@ -925,6 +959,94 @@ async function runCommand(text) {
     return;
   }
   refresh();
+}
+
+// Befehle, die vorhandene Einträge ändern oder etwas anzeigen; jede Änderung lässt sich rückgängig machen
+async function runIntent(c) {
+  const e = c.target, raw = e?.raw ?? {};
+  const table = e?.kind === "routine" ? "routines" : "items";
+  const update = async (patch, msg) => {
+    const before = Object.fromEntries(Object.keys(patch).map((k) => [k, raw[k] ?? null]));
+    const { error } = await db.from(table).update(patch).eq("id", e.id);
+    if (error) return toast(error.message);
+    Object.assign(raw, patch);
+    toast(msg, async () => { await db.from(table).update(before).eq("id", e.id); Object.assign(raw, before); refresh(); });
+    state.upcoming = null;
+    refresh();
+  };
+
+  switch (c.type) {
+    case "hilfe": return openHelp();
+    case "sprache":
+      setLang(c.lang); render(); saveSettings({ lang: LANG });
+      return toast(c.lang === "tr" ? "Dil: Türkçe" : "Sprache: Deutsch");
+    case "gruppe":
+      setPlanGroup(c.g); switchView("plan");
+      return toast(t(c.g === "zeit" ? "Routinen nach Tageszeit sortiert" : "Routinen nach Bereich sortiert"));
+    case "zeige":
+      if (c.date) state.day = new Date(c.date + "T12:00");
+      return switchView(c.view);
+    case "detail": return openDetail(e);
+    case "offen":
+      if (e.kind === "routine") { await setRoutineDone(e.id, false); refresh(); return toast(t("Wieder offen: {x}", { x: e.title }), async () => { await setRoutineDone(e.id, true); refresh(); }); }
+      return update({ done: false }, t("Wieder offen: {x}", { x: e.title }));
+    case "loeschen": {
+      if (!confirm(t("{x} löschen?", { x: e.title }))) return;
+      const { error } = await db.from(table).delete().eq("id", e.id);
+      if (error) return toast(error.message);
+      state.upcoming = null;
+      toast(t("Gelöscht: {x}", { x: e.title }), async () => { await db.from(table).insert(raw); refresh(); });
+      return refresh();
+    }
+    case "verschieben": {
+      if (e.kind === "routine") {
+        if (!c.time) return toast(t("Für Routinen bitte eine Uhrzeit sagen."));
+        if (raw.prayer) return toast(t("Gebetszeiten kommen automatisch."));
+        return update({ at_time: c.time, anchor_prayer: null }, t("{x} jetzt um {t}", { x: e.title, t: c.time }));
+      }
+      const patch = {};
+      if (c.date) patch.on_date = c.date;
+      if (c.time) patch.start_time = c.time;
+      if (c.end) patch.end_time = c.end;
+      return update(patch, t("Verschoben: {x}", { x: e.title }) + ` → ${[c.date ? fmtDay(c.date) : "", c.time ?? ""].filter(Boolean).join(" ")}`);
+    }
+    case "pause": return update({ active: c.active }, t(c.active ? "Aktiviert: {x}" : "Pausiert: {x}", { x: e.title }));
+    case "prio": return update({ priority: c.priority }, t(c.priority === "hoch" ? "Wichtig: {x}" : "Normal: {x}", { x: e.title }));
+    case "erinnerung": return update({ remind_before: c.minutes }, `${t("Erinnerung")}: ${e.title} · ${c.minutes >= 60 ? t("{n} Std. vorher", { n: c.minutes / 60 }) : t("{n} Min. vorher", { n: c.minutes })}`);
+    case "checkliste": return update({ checklist: [...(raw.checklist ?? []), { t: c.item, d: false }] }, t("{y} auf {x}", { x: e.title, y: c.item }));
+  }
+}
+
+// Hilfe: was die Sprachsteuerung versteht, mit Beispielen zum Antippen
+const HELP = {
+  de: [
+    ["Anlegen", ["Termin morgen um 15 Uhr Zahnarzt", "Aufgabe Steuer bis Freitag, wichtig", "Täglich um 21 Uhr Buch lesen"]],
+    ["Abhaken", ["Asr erledigt", "Asr doch nicht erledigt"]],
+    ["Ändern", ["Verschiebe Zahnarzt auf Freitag um 10", "Mach Steuer wichtig", "Pausiere Retinol", "Erinnere mich 30 Minuten vorher an Zahnarzt", "Füge Milch zur Einkaufsliste hinzu", "Lösche den Termin Zahnarzt"]],
+    ["Anzeigen", ["Was steht morgen an", "Zeig mir die Termine", "Teile die Routinen nach Tageszeit auf", "Öffne die Einstellungen"]],
+    ["Sprache", ["Sprich Türkisch"]],
+  ],
+  tr: [
+    ["Ekle", ["Yarın saat 15'te diş doktoru randevusu", "Vergi görevi cumaya kadar, önemli", "Her gün saat 21'de kitap oku"]],
+    ["İşaretle", ["İkindiyi kıldım", "İkindiyi kılmadım"]],
+    ["Değiştir", ["Diş doktorunu cumaya ertele", "Vergi önemli", "Retinol'ü durdur", "Diş doktoru için 1 saat önce hatırlat", "Alışveriş listesine süt ekle", "Diş doktoru randevusunu sil"]],
+    ["Göster", ["Yarın neler var", "Randevuları göster", "Rutinleri vakte göre sırala", "Ayarları aç"]],
+    ["Dil", ["Almancaya geç"]],
+  ],
+};
+function openHelp() {
+  form.innerHTML = `<h3>${t("Das verstehe ich")}</h3>
+    ${HELP[LANG].map(([h, list]) => `<p class="eyebrow" style="margin-top:14px">${h}</p>
+      <div class="help-list">${list.map((x) => `<button type="button" class="chip" data-say="${esc(x)}">${esc(x)}</button>`).join("")}</div>`).join("")}`;
+  form.onsubmit = (ev) => ev.preventDefault();
+  form.querySelectorAll("[data-say]").forEach((b) => (b.onclick = () => {
+    sheet.close();
+    $("#cmd-input").value = b.dataset.say;
+    $("#preview").hidden = true;
+    openSheet(voice);
+    showPreview();
+  }));
+  openSheet(sheet);
 }
 
 // Auge: Passwort ein- und ausblenden
