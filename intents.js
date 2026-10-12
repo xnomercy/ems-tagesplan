@@ -85,6 +85,13 @@ export function parseIntent(text, now = new Date(), targets = [], lang = "de") {
   if (RE.tuerkisch.test(s)) return { type: "sprache", lang: "tr" };
   if (RE.deutsch.test(s)) return { type: "sprache", lang: "de" };
 
+  // Darstellung: "dunkler Modus", "hell", "karanlık mod", "aydınlık tema"
+  if (rx(`modus|design|darstellung|thema|theme|tema|mod${W}|görünüm${W}`).test(s) || rx(`mach${W}\\s+(?:es\\s+)?(?:hell|dunkel)`).test(s)) {
+    if (rx(`dunk${W}|dark|nacht${W}|karanlık${W}|koyu${W}|gece${W}`).test(s)) return { type: "theme", theme: "dark" };
+    if (rx(`hell${W}|light|tag${W}|aydınlık${W}|açık${W}|gündüz${W}`).test(s)) return { type: "theme", theme: "light" };
+    if (rx(`auto${W}|system${W}|otomatik${W}`).test(s)) return { type: "theme", theme: "auto" };
+  }
+
   // Routinen-Ansicht nach Tageszeit oder Bereich
   if (/routin|rutin/iu.test(s) && RE.gruppe.test(s)) {
     return { type: "gruppe", g: /(bereich|kategorie|alan)/iu.test(s) ? "bereich" : "zeit" };

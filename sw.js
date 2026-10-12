@@ -1,5 +1,5 @@
 // Hält die App-Dateien offline bereit. Daten kommen immer frisch von Supabase.
-const CACHE = "tagesplan-v12";
+const CACHE = "tagesplan-v13";
 const SHELL = ["./", "index.html", "style.css", "app.js", "parser.js", "parser-tr.js", "i18n.js", "intents.js", "version.json", "manifest.webmanifest", "icon-192.png", "ems-logo.png", "ems-mark.png"];
 
 self.addEventListener("install", (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())));

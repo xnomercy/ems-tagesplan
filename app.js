@@ -7,7 +7,7 @@ const SUPABASE_URL = "https://hpxdhtuabzqwyslzcmbt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kKiQdntJd893YvBPFx7fhw_FYzlwwtz";
 const DEMO = new URLSearchParams(location.search).has("demo");
 // Bei jeder Veröffentlichung zusammen mit version.json und dem Cache-Namen in sw.js hochzählen
-const APP_VERSION = "12";
+const APP_VERSION = "13";
 const db = DEMO
   ? (await import("./mock.js")).db
   : (await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm")).createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -326,6 +326,12 @@ function renderMehr() {
       </div>
     </div>
     <div class="card">
+      <p class="eyebrow">${t("Darstellung")}</p>
+      <div class="seg" id="theme-seg">
+        ${[["auto", "Automatisch"], ["light", "Hell"], ["dark", "Dunkel"]].map(([v, n]) => `<button type="button" data-theme="${v}" class="${themePref === v ? "on" : ""}">${t(n)}</button>`).join("")}
+      </div>
+    </div>
+    <div class="card">
       <p class="eyebrow">${t("Mitteilungen")}</p>
       <p id="push-state" class="small">${state.pushText ?? t("Prüfe …")}</p>
       <button class="btn fill" id="push-on">${state.pushBtn ?? t("Mitteilungen einschalten")}</button>
@@ -384,6 +390,7 @@ function renderMehr() {
   $("#copy-feed").onclick = () => navigator.clipboard.writeText(feed).then(() => toast(t("Link kopiert")));
   $("#open-feed").onclick = () => { location.href = feed.replace(/^https:/, "webcal:"); };
   $("#logout").onclick = () => db.auth.signOut();
+  document.querySelectorAll("#theme-seg button").forEach((b) => (b.onclick = () => { setTheme(b.dataset.theme); renderMehr(); }));
   document.querySelectorAll("#lang-seg button").forEach((b) => (b.onclick = () => { setLang(b.dataset.lang); render(); saveSettings({ lang: LANG }); }));
 }
 
@@ -885,6 +892,7 @@ function describe(cmd) {
   const x = cmd.target ? cmd.target.title : "";
   if (cmd.type === "hilfe") return [t("Hilfe"), t("Zeigt, was du sagen kannst")];
   if (cmd.type === "sprache") return [t("Sprache"), cmd.lang === "tr" ? "Türkçe" : "Deutsch"];
+  if (cmd.type === "theme") return [t("Darstellung"), t({ auto: "Automatisch", light: "Hell", dark: "Dunkel" }[cmd.theme])];
   if (cmd.type === "gruppe") return [t("Routinen"), t(cmd.g === "zeit" ? "Nach Tageszeit" : "Nach Bereich")];
   if (cmd.type === "zeige") return [t("Anzeigen"), cmd.date ? fmtDay(cmd.date, { weekday: "long", day: "numeric", month: "long" }) : t({ heute: "Tag", termine: "Termine", plan: "Routinen", mehr: "Einstellungen" }[cmd.view])];
   if (cmd.type === "detail") return [t("Anzeigen"), x];
@@ -980,6 +988,9 @@ async function runIntent(c) {
     case "sprache":
       setLang(c.lang); render(); saveSettings({ lang: LANG });
       return toast(c.lang === "tr" ? "Dil: Türkçe" : "Sprache: Deutsch");
+    case "theme":
+      setTheme(c.theme);
+      return toast(t({ auto: "Automatisch", light: "Hell", dark: "Dunkel" }[c.theme]));
     case "gruppe":
       setPlanGroup(c.g); switchView("plan");
       return toast(t(c.g === "zeit" ? "Routinen nach Tageszeit sortiert" : "Routinen nach Bereich sortiert"));
@@ -1094,14 +1105,14 @@ const HELP = {
     ["Abhaken", ["Asr erledigt", "Asr doch nicht erledigt"]],
     ["Ändern", ["Verschiebe Zahnarzt auf Freitag um 10", "Mach Steuer wichtig", "Pausiere Retinol", "Erinnere mich 30 Minuten vorher an Zahnarzt", "Füge Milch zur Einkaufsliste hinzu", "Lösche den Termin Zahnarzt"]],
     ["Anzeigen", ["Was steht morgen an", "Zeig mir die Termine", "Teile die Routinen nach Tageszeit auf", "Öffne die Einstellungen"]],
-    ["Sprache", ["Sprich Türkisch"]],
+    ["Einstellungen", ["Sprich Türkisch", "Dunkler Modus", "Heller Modus"]],
   ],
   tr: [
     ["Ekle", ["Yarın saat 15'te diş doktoru randevusu yer Müller muayenehanesi", "Vergi görevi cumaya kadar, önemli", "Her gün saat 21'de kitap oku"]],
     ["İşaretle", ["İkindiyi kıldım", "İkindiyi kılmadım"]],
     ["Değiştir", ["Diş doktorunu cumaya ertele", "Vergi önemli", "Retinol'ü durdur", "Diş doktoru için 1 saat önce hatırlat", "Alışveriş listesine süt ekle", "Diş doktoru randevusunu sil"]],
     ["Göster", ["Yarın neler var", "Randevuları göster", "Rutinleri vakte göre sırala", "Ayarları aç"]],
-    ["Dil", ["Almancaya geç"]],
+    ["Ayarlar", ["Almancaya geç", "Koyu mod", "Açık mod"]],
   ],
 };
 function openHelp() {
@@ -1142,6 +1153,24 @@ function toast(msg, undo) {
 }
 
 document.addEventListener("visibilitychange", () => { if (!document.hidden && state.user) refresh(); if (!document.hidden) checkVersion(); });
+
+// ---------- Hell / Dunkel ----------
+let themePref = "auto";
+try { themePref = localStorage.getItem("tagesplan-theme") || "auto"; } catch {}
+const darkMQ = matchMedia("(prefers-color-scheme: dark)");
+function applyTheme() {
+  const dark = themePref === "dark" || (themePref === "auto" && darkMQ.matches);
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = dark ? "#071F26" : "#F4F7F6";
+}
+function setTheme(p) {
+  themePref = p;
+  try { localStorage.setItem("tagesplan-theme", p); } catch {}
+  applyTheme();
+}
+darkMQ.addEventListener?.("change", applyTheme);
+applyTheme();
 
 // ---------- Neue Version ----------
 async function checkVersion() {

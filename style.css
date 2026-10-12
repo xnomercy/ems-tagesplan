@@ -15,18 +15,17 @@
   --shadow: 0 1px 2px rgba(11,61,74,.05), 0 6px 20px rgba(11,61,74,.06);
   --radius: 18px;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #071F26;
-    --card: #0E2F38;
-    --text: #E8F3F4;
-    --muted: #8FB0B6;
-    --line: #18414B;
-    --soft: #123A44;
-    --petrol: #2A93A7;
-    --shadow: none;
-    --danger: #F08A5D;
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #071F26;
+  --card: #0E2F38;
+  --text: #E8F3F4;
+  --muted: #8FB0B6;
+  --line: #18414B;
+  --soft: #123A44;
+  --petrol: #2A93A7;
+  --shadow: none;
+  --danger: #F08A5D;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -45,7 +44,7 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
 .login-box { max-width: 400px; margin: 0 auto; padding: 12vh 24px 40px; }
 .login-logo { width: 170px; margin-bottom: 36px; }
 .login-box h1 { font-size: 34px; line-height: 1.15; margin: 0 0 24px; font-weight: 800; }
-@media (prefers-color-scheme: dark) { .login-logo { background: #fff; padding: 10px 14px; border-radius: 14px; } }
+:root[data-theme="dark"] .login-logo { background: #fff; padding: 10px 14px; border-radius: 14px; }
 
 form input, form select, form textarea {
   width: 100%; padding: 13px 16px; margin: 6px 0; border: 1.5px solid var(--line);
@@ -73,7 +72,7 @@ button.danger, .danger { color: var(--danger) !important; }
   width: 44px; height: 44px; border-radius: 14px; border: 0; background: var(--card);
   display: grid; place-items: center; box-shadow: var(--shadow); color: var(--deep);
 }
-@media (prefers-color-scheme: dark) { .round-btn { color: var(--text); } }
+:root[data-theme="dark"] .round-btn { color: var(--text); }
 
 main { padding: 8px 20px; max-width: 640px; margin: 0 auto; }
 
@@ -130,7 +129,7 @@ main { padding: 8px 20px; max-width: 640px; margin: 0 auto; }
 .card-item.next { box-shadow: 0 0 0 2px var(--tuerkis), var(--shadow); }
 .badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 8px; background: var(--soft); color: var(--petrol); }
 .badge.late { background: #FDECE3; color: var(--danger); }
-@media (prefers-color-scheme: dark) { .badge.late { background: #3A2219; } }
+:root[data-theme="dark"] .badge.late { background: #3A2219; }
 .check {
   width: 34px; height: 34px; flex: none; border-radius: 17px; border: 2px solid var(--line);
   background: none; display: grid; place-items: center; padding: 0; color: #fff; transition: all .15s;
@@ -235,9 +234,7 @@ form select {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231F7A8C' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 18px center; background-size: 18px;
 }
-@media (prefers-color-scheme: dark) {
-  form select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2351B8C4' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); }
-}
+:root[data-theme="dark"] form select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2351B8C4' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); }
 
 /* Blätter fahren von unten hoch */
 dialog[open] { animation: sheet-up .28s cubic-bezier(.2,.8,.2,1); transition: transform .22s ease; }
@@ -260,7 +257,6 @@ dialog::before { content: ""; display: block; width: 40px; height: 5px; border-r
 .card-item { cursor: pointer; }
 .card-item .notes.clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .badge.prio { background: #E5252A; color: #fff; }
-@media (prefers-color-scheme: dark) { .badge.prio { background: #3A2219; } }
 
 /* Checkliste */
 .cl-row { display: flex; align-items: center; gap: 8px; }
