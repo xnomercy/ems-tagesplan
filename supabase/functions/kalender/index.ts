@@ -19,7 +19,7 @@ function addMinutes(t: string, min: number): string {
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
-function event(uid: string, date: string, start: string, end: string, title: string, notes?: string, rrule?: string) {
+function event(uid: string, date: string, start: string, end: string, title: string, notes?: string, rrule?: string, location?: string) {
   const lines = [
     "BEGIN:VEVENT",
     `UID:${uid}@tagesplan`,
@@ -30,6 +30,7 @@ function event(uid: string, date: string, start: string, end: string, title: str
   ];
   if (rrule) lines.push(`RRULE:${rrule}`);
   if (notes) lines.push(`DESCRIPTION:${esc(notes)}`);
+  if (location) lines.push(`LOCATION:${esc(location)}`);
   lines.push("BEGIN:VALARM", "ACTION:DISPLAY", `DESCRIPTION:${esc(title)}`, "TRIGGER:PT0M", "END:VALARM", "END:VEVENT");
   return lines.join("\r\n");
 }
@@ -60,7 +61,7 @@ Deno.serve(async (req) => {
 
   for (const i of items ?? []) {
     const end = i.end_time ?? addMinutes(i.start_time, 60);
-    out.push(event(i.id, i.on_date, i.start_time, end, i.kind === "aufgabe" ? `Aufgabe: ${i.title}` : i.title, i.notes));
+    out.push(event(i.id, i.on_date, i.start_time, end, i.kind === "aufgabe" ? `Aufgabe: ${i.title}` : i.title, i.notes, undefined, i.location));
   }
 
   // Gebete und an Gebete gekoppelte Routinen: Zeiten pro Tag für diesen und nächsten Monat
