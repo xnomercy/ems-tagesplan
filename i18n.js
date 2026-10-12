@@ -214,6 +214,14 @@ const TR = {
   "Keine Uhrzeit": "Saat yok",
   "Neue Version verfügbar": "Yeni sürüm hazır",
   "Aktualisieren": "Güncelle",
+  "Nach Tageszeit": "Vakte göre",
+  "Nach Bereich": "Alana göre",
+  "Morgens": "Sabah",
+  "Mittags": "Öğlen",
+  "Abends": "Akşam",
+  "Ohne feste Uhrzeit": "Saati belli değil",
+  "Routinen nach Tageszeit sortiert": "Rutinler vakte göre sıralandı",
+  "Routinen nach Bereich sortiert": "Rutinler alana göre sıralandı",
   "Mo": "Pzt", "Di": "Sal", "Mi": "Çar", "Do": "Per", "Fr": "Cum", "Sa": "Cmt", "So": "Paz",
 };
 

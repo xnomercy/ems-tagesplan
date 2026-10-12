@@ -6,7 +6,7 @@ const SUPABASE_URL = "https://hpxdhtuabzqwyslzcmbt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kKiQdntJd893YvBPFx7fhw_FYzlwwtz";
 const DEMO = new URLSearchParams(location.search).has("demo");
 // Bei jeder Veröffentlichung zusammen mit version.json und dem Cache-Namen in sw.js hochzählen
-const APP_VERSION = "7";
+const APP_VERSION = "8";
 const db = DEMO
   ? (await import("./mock.js")).db
   : (await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm")).createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -137,6 +137,7 @@ async function refresh() {
   ]);
   if (r.error) { toast(t("Laden fehlgeschlagen: {x}", { x: r.error.message })); return; }
   state.routines = r.data;
+  state.pt = pt;
   const done = new Set((c.data ?? []).map((x) => x.routine_id));
   const wd = weekday(state.day);
 
@@ -252,15 +253,29 @@ function renderDay() {
   if (sel) sel.scrollIntoView({ inline: "center", block: "nearest" });
 }
 
+// Routinen nach Tageszeit (Standard) oder nach Bereich gruppieren
+let planGroup = "zeit";
+try { planGroup = localStorage.getItem("tagesplan-plan-group") || "zeit"; } catch {}
+function setPlanGroup(g) { planGroup = g; try { localStorage.setItem("tagesplan-plan-group", g); } catch {} }
+const DAYPARTS = [["morgens", "Morgens"], ["mittags", "Mittags"], ["abends", "Abends"], ["flex", "Ohne feste Uhrzeit"]];
+const daypart = (time) => !time ? "flex" : time < "11:00" ? "morgens" : time < "17:00" ? "mittags" : "abends";
+
 function renderPlan() {
+  const byTime = planGroup === "zeit";
   const groups = {};
-  for (const r of state.routines) (groups[r.category] ??= []).push(r);
+  const timeOf = (r) => routineTime(r, state.pt);
+  for (const r of state.routines) (groups[byTime ? daypart(timeOf(r)) : r.category] ??= []).push(r);
+  if (byTime) for (const list of Object.values(groups)) list.sort((a, b) => (timeOf(a) ?? "99").localeCompare(timeOf(b) ?? "99"));
   let html = `<div class="section-head"><h3>${t("Routinen")}</h3><span class="muted">${t("{n} Einträge", { n: state.routines.length })}</span></div>
-    <p class="muted small" style="margin-top:-4px">${t("Feste, wiederkehrende Punkte. Tippe zum Bearbeiten.")}</p>`;
-  for (const cat of Object.keys(CATEGORIES)) {
-    const list = groups[cat];
+    <div class="seg" id="group-seg">
+      <button type="button" data-g="zeit" class="${byTime ? "on" : ""}">${t("Nach Tageszeit")}</button>
+      <button type="button" data-g="bereich" class="${byTime ? "" : "on"}">${t("Nach Bereich")}</button>
+    </div>`;
+  const order = byTime ? DAYPARTS : Object.entries(CATEGORIES);
+  for (const [key, label] of order) {
+    const list = groups[key];
     if (!list) continue;
-    html += `<p class="eyebrow" style="margin-top:18px">${CATEGORIES[cat]}</p>`;
+    html += `<p class="eyebrow" style="margin-top:18px">${byTime ? t(label) : label}</p>`;
     html += list.map((r) => `<button class="list-item ${r.active ? "" : "off"}" data-edit-routine="${r.id}">
       <div class="tm">${routineWhen(r)}</div>
       <div class="body"><div class="title">${esc(r.title)}</div>
@@ -269,6 +284,7 @@ function renderPlan() {
   }
   html += `<button class="primary" id="new-routine">${t("Neue Routine")}</button>`;
   $("#view-plan").innerHTML = html;
+  $("#view-plan").querySelectorAll("#group-seg button").forEach((b) => (b.onclick = () => { setPlanGroup(b.dataset.g); renderPlan(); }));
 }
 
 async function renderTermine() {
@@ -781,7 +797,7 @@ function bindSheetButtons(onDelete) {
 // ---------- Sprache ----------
 const voice = $("#voice");
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null;
+let rec = null, silenceTimer = null;
 
 $("#mic").onclick = () => {
   $("#cmd-input").value = "";
@@ -805,23 +821,35 @@ function startListening() {
     rec = new Recognition();
     rec.lang = LOCALE();
     rec.interimResults = true;
+    // Weiter zuhören, auch bei kurzen Pausen; erst nach 2,5 s Stille übernehmen
+    rec.continuous = true;
+    const SILENCE = 2500;
+    let said = "";
+    const arm = () => {
+      clearTimeout(silenceTimer);
+      silenceTimer = setTimeout(() => { stopListening(); if ($("#cmd-input").value.trim()) $("#cmd-form").requestSubmit(); }, SILENCE);
+    };
     rec.onresult = (e) => {
-      const r = e.results[e.results.length - 1];
-      $("#cmd-input").value = r[0].transcript;
+      let interim = "";
+      for (let k = e.resultIndex; k < e.results.length; k++) {
+        if (e.results[k].isFinal) said += e.results[k][0].transcript + " ";
+        else interim += e.results[k][0].transcript;
+      }
+      $("#cmd-input").value = (said + interim).replace(/\s+/g, " ").trim();
       showPreview();
-      if (r.isFinal) { stopListening(); setTimeout(() => $("#cmd-form").requestSubmit(), 700); }
+      arm();
     };
     rec.onerror = (e) => {
       if (e.error === "no-speech") $("#voice-state").textContent = t("Nichts gehört. Nochmal tippen.");
       else if (e.error !== "aborted") { $("#voice-state").textContent = t("Mikro hier nicht verfügbar. Nutze das Mikro deiner Tastatur."); $("#cmd-input").focus(); }
     };
-    rec.onend = () => { rec = null; $("#voice-orb").classList.remove("listening"); if ($("#voice-state").textContent === t("Ich höre zu …")) $("#voice-state").textContent = t("Tippe zum Sprechen"); };
+    rec.onend = () => { clearTimeout(silenceTimer); rec = null; $("#voice-orb").classList.remove("listening"); if ($("#voice-state").textContent === t("Ich höre zu …")) $("#voice-state").textContent = t("Tippe zum Sprechen"); };
     rec.start();
     $("#voice-orb").classList.add("listening");
     $("#voice-state").textContent = t("Ich höre zu …");
   } catch { rec = null; }
 }
-function stopListening() { if (rec) rec.stop(); }
+function stopListening() { clearTimeout(silenceTimer); if (rec) rec.stop(); }
 
 // Türkisch zuerst, deutsche Befehle klappen trotzdem
 function parseCmd(text, now, cands) {
@@ -860,6 +888,14 @@ $("#cmd-form").onsubmit = async (e) => {
 };
 
 async function runCommand(text) {
+  // "Teile die Routinen nach morgens, mittags, abends auf" -> Ansicht umstellen
+  if (/routin/i.test(text) && /(morgen|mittag|abend|tageszeit|sabah|öğle|akşam|vakit|bereich|kategorie|alan)/i.test(text) && /(teil|sortier|ordne|grupp|zeig|ayır|sırala|grupla|göster)/i.test(text)) {
+    const g = /(bereich|kategorie|alan)/i.test(text) ? "bereich" : "zeit";
+    setPlanGroup(g);
+    switchView("plan");
+    toast(t(g === "zeit" ? "Routinen nach Tageszeit sortiert" : "Routinen nach Bereich sortiert"));
+    return;
+  }
   const cmd = parseCmd(text, new Date(), candidates());
 
   if (cmd.type === "erledigt") {
