@@ -9,10 +9,10 @@ const defaults = {
   completions: () => ({ user_id: uid }),
   supplies: () => ({ id: id(), user_id: uid, unit: "Kapseln", stock: 0, per_day: 1, counted_on: new Date().toISOString().slice(0, 10), warn_days: 7, created_at: new Date().toISOString() }),
   push_subscriptions: () => ({ user_id: uid }),
-  exercises: () => ({ id: id(), user_id: uid, pattern: "generic", notes: null, sets: 3, rest_sec: 90, created_at: new Date().toISOString() }),
+  exercises: () => ({ id: id(), user_id: uid, pattern: "generic", mode: "reps", notes: null, sets: 3, rest_sec: 90, created_at: new Date().toISOString() }),
   workouts: () => ({ id: id(), user_id: uid, exercise_ids: [], created_at: new Date().toISOString() }),
   workout_sessions: () => ({ id: id(), user_id: uid, workout_id: null, name: null, started_at: new Date().toISOString(), finished_at: null, notes: null }),
-  workout_sets: () => ({ id: id(), user_id: uid, set_no: 1, kg: null, reps: null, created_at: new Date().toISOString() }),
+  workout_sets: () => ({ id: id(), user_id: uid, set_no: 1, kg: null, reps: null, duration_sec: null, speed: null, incline: null, created_at: new Date().toISOString() }),
 };
 
 class Query {

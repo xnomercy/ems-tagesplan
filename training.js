@@ -12,6 +12,20 @@ const SEED = [
   ["SZ-Stirndrücken", "skullcrusher"],
 ];
 
+// Ergänzung vom 2026-10-13: unterer Rücken, hintere Schulter, Bauch, Laufband
+const EXTRA = [
+  ["Face Pulls am Seil", "face_pull", "reps", 3, 60, "Seil auf Augenhöhe, Ellbogen hoch, zum Gesicht ziehen"],
+  ["Hyperextensions (45°)", "hyperext", "reps", 3, 60, "Langsam, oben nicht ins Hohlkreuz"],
+  ["Rumänisches Kreuzheben (Kurzhanteln)", "rdl", "reps", 3, 90, "Leicht anfangen, Rücken gerade, Hüfte nach hinten schieben"],
+  ["Hip Thrust", "hip_thrust", "reps", 3, 90, "Oben kurz halten, Gesäß anspannen"],
+  ["Reverse Butterfly", "reverse_fly", "reps", 3, 60, "Leichtes Gewicht, Schulterblätter zusammenziehen"],
+  ["Dead Bug", "dead_bug", "reps", 3, 45, "Pro Seite zählen, unterer Rücken bleibt am Boden"],
+  ["Seitstütz", "side_plank", "time", 2, 45, "Pro Seite"],
+  ["Pallof Press", "pallof", "reps", 3, 45, "Pro Seite, Oberkörper nicht mitdrehen"],
+  ["Laufband bergauf", "treadmill", "cardio", 1, 0, "8 bis 12 % Steigung, 4,5 bis 5,5 km/h, nicht festhalten"],
+];
+const EXTRA_KEY = "tagesplan-train-v2";
+
 export function createTraining(ctx) {
   const { db, t, esc, $, toast, openSheet, closeSheet, sheet, form, isoDate, fmtDay, LOCALE } = ctx;
   const T = { exercises: [], workouts: [], sessions: [], sets: [], loaded: false, draft: {}, extraRows: {}, extraEx: [], rest: null, host: null };
@@ -26,11 +40,36 @@ export function createTraining(ctx) {
     const s = T.sessions.find((x) => x.id !== exceptSession && T.sets.some((y) => y.session_id === x.id && y.exercise_id === exId));
     return s ? { session: s, sets: setsOf(s.id, exId) } : null;
   };
-  const fmtSet = (s) => `${s.kg != null ? num(s.kg) + " kg" : "–"} × ${s.reps ?? "–"}`;
+  // Erfassung je Übung: kg × Wiederholungen, Zeit (Sekunden) oder Cardio (Minuten, km/h, Steigung)
+  const FIELDS = {
+    reps: [{ k: "kg", label: "kg", dec: true }, { k: "reps", label: "Wdh." }],
+    time: [{ k: "kg", label: "kg", dec: true }, { k: "duration_sec", label: "Sek." }],
+    cardio: [{ k: "duration_sec", label: "Min.", scale: 60, dec: true }, { k: "speed", label: "km/h", dec: true }, { k: "incline", label: "%", dec: true }],
+  };
+  const modeOf = (x) => (FIELDS[x?.mode] ? x.mode : "reps");
+  const fieldVal = (s, f) => (s?.[f.k] == null ? null : f.scale ? Number(s[f.k]) / f.scale : Number(s[f.k]));
+  const fmtSet = (s) => {
+    const m = modeOf(exById(s.exercise_id));
+    if (m === "cardio") return [s.duration_sec != null ? num(s.duration_sec / 60) + " Min" : "", s.speed != null ? num(s.speed) + " km/h" : "", s.incline != null ? num(s.incline) + " %" : ""].filter(Boolean).join(" · ");
+    if (m === "time") return `${s.kg ? num(s.kg) + " kg · " : ""}${s.duration_sec ?? "–"} s`;
+    return s.kg != null ? `${num(s.kg)} kg × ${s.reps ?? "–"}` : `${s.reps ?? "–"} ${t("Wdh.")}`;
+  };
+  // Kennzahl für Bestwert und Kurve
+  const metric = (x, sets) => {
+    const m = modeOf(x);
+    if (m === "cardio") return { v: Math.max(0, ...sets.map((s) => (s.duration_sec ?? 0) / 60)), u: "Min" };
+    if (m === "time") return { v: Math.max(0, ...sets.map((s) => s.duration_sec ?? 0)), u: "s" };
+    const kg = Math.max(0, ...sets.map((s) => Number(s.kg) || 0));
+    return kg ? { v: kg, u: "kg" } : { v: Math.max(0, ...sets.map((s) => s.reps ?? 0)), u: t("Wdh.") };
+  };
   const volume = (sets) => sets.reduce((a, s) => a + (Number(s.kg) || 0) * (s.reps || 0), 0);
 
-  async function load(force = false) {
-    if (T.loaded && !force) return;
+  function load(force = false) {
+    if (T.loaded && !force) return Promise.resolve();
+    // Gleichzeitige Aufrufe teilen sich einen Ladevorgang, sonst würde doppelt angelegt
+    return (T.loading ??= doLoad().finally(() => { T.loading = null; }));
+  }
+  async function doLoad() {
     const [e, w, s, x] = await Promise.all([
       db.from("exercises").select("*").order("created_at"),
       db.from("workouts").select("*").order("created_at"),
@@ -41,6 +80,38 @@ export function createTraining(ctx) {
     T.exercises = e.data ?? []; T.workouts = w.data ?? []; T.sessions = s.data ?? []; T.sets = x.data ?? [];
     T.loaded = true;
     if (!T.exercises.length && !T.workouts.length) await seed();
+    await seedExtras();
+  }
+
+  // Neue Übungen einmalig ergänzen, ohne Doppelte und ohne gelöschte zurückzuholen
+  async function seedExtras() {
+    try { if (localStorage.getItem(EXTRA_KEY)) return; } catch {}
+    const have = new Set(T.exercises.map((x) => x.name.toLowerCase()));
+    const missing = EXTRA.filter(([n]) => !have.has(n.toLowerCase()));
+    if (missing.length) {
+      const { data, error } = await db.from("exercises").insert(missing.map(([name, pattern, mode, sets, rest_sec, notes]) => ({ name, pattern, mode, sets, rest_sec, notes }))).select();
+      if (error) return;
+      T.exercises.push(...(data ?? []));
+    }
+    const idOf = (n) => T.exercises.find((x) => x.name.toLowerCase() === n.toLowerCase())?.id;
+    const back = T.workouts.find((w) => /rücken/i.test(w.name));
+    if (back) {
+      const add = ["Face Pulls am Seil", "Hyperextensions (45°)"].map(idOf).filter((id) => id && !back.exercise_ids.includes(id));
+      if (add.length) {
+        // nach den Zugübungen, vor dem Trizeps
+        const ids = [...back.exercise_ids];
+        const at = ids.findIndex((id) => /^(pushdown|overhead_ext|skullcrusher)$/.test(exById(id)?.pattern ?? ""));
+        ids.splice(at < 0 ? ids.length : at, 0, ...add);
+        const { data } = await db.from("workouts").update({ exercise_ids: ids }).eq("id", back.id).select().single();
+        back.exercise_ids = data?.exercise_ids ?? ids;
+      }
+    }
+    if (!T.workouts.some((w) => /core/i.test(w.name))) {
+      const ids = ["Dead Bug", "Seitstütz", "Pallof Press", "Laufband bergauf"].map(idOf).filter(Boolean);
+      const { data } = await db.from("workouts").insert({ name: "Core + Stabi", exercise_ids: ids }).select().single();
+      if (data) T.workouts.push(data);
+    }
+    try { localStorage.setItem(EXTRA_KEY, "1"); } catch {}
   }
 
   async function seed() {
@@ -77,11 +148,11 @@ export function createTraining(ctx) {
     html += `<button type="button" class="ghost" id="w-new">${t("+ Neuer Plan")}</button>`;
     html += `<div class="section-head"><h3>${t("Übungen")}</h3><span class="muted">${T.exercises.length}</span></div>`;
     html += T.exercises.map((x) => {
-      const best = Math.max(0, ...T.sets.filter((s) => s.exercise_id === x.id).map((s) => Number(s.kg) || 0));
+      const best = metric(x, T.sets.filter((s) => s.exercise_id === x.id));
       const last = lastSets(x.id);
       return `<button type="button" class="ex-row" data-ex="${x.id}">${figureSvg(x.pattern, { size: 64, animate: false })}
         <span class="ex-body"><b>${esc(x.name)}</b><span class="small muted">${last ? t("Letztes Mal: {x}", { x: last.sets.map(fmtSet).join(" · ") }) : t("Noch nicht trainiert")}</span>
-        ${best ? `<span class="small">${t("Bestwert {n} kg", { n: num(best) })}</span>` : ""}</span><span class="muted">›</span></button>`;
+        ${best.v ? `<span class="small">${t("Bestwert")}: ${num(best.v)} ${best.u}</span>` : ""}</span><span class="muted">›</span></button>`;
     }).join("");
     html += `<button type="button" class="ghost" id="ex-new">${t("+ Neue Übung")}</button>`;
     const done = T.sessions.filter((s) => s.finished_at).slice(0, 10);
@@ -91,7 +162,7 @@ export function createTraining(ctx) {
         const sets = T.sets.filter((x) => x.session_id === s.id);
         const mins = Math.round((Date.parse(s.finished_at) - Date.parse(s.started_at)) / 60000);
         return `<div class="card hist-card"><b>${esc(s.name ?? t("Training"))}</b><span class="small muted">${fmtDay(isoDate(new Date(s.started_at)), { weekday: "long", day: "numeric", month: "long" })} · ${t("{n} Min.", { n: mins })}</span>
-          <span class="small">${t("{n} Sätze · {kg} kg bewegt", { n: sets.length, kg: num(Math.round(volume(sets))) })}</span></div>`;
+          <span class="small">${volume(sets) ? t("{n} Sätze · {kg} kg bewegt", { n: sets.length, kg: num(Math.round(volume(sets))) }) : t("{n} Sätze", { n: sets.length })}</span></div>`;
       }).join("");
     }
     return html;
@@ -110,7 +181,7 @@ export function createTraining(ctx) {
     const mins = Math.max(0, Math.round((Date.now() - Date.parse(run.started_at)) / 60000));
     const all = T.sets.filter((s) => s.session_id === run.id);
     let html = `<div class="hero run-hero"><p class="eyebrow">${t("Training läuft")}</p><h2>${esc(run.name ?? t("Training"))}</h2>
-      <div class="meta"><span>${t("seit {n} Min.", { n: mins })}</span><span>${t("{n} Sätze · {kg} kg", { n: all.length, kg: num(Math.round(volume(all))) })}</span></div></div>`;
+      <div class="meta"><span>${t("seit {n} Min.", { n: mins })}</span><span>${volume(all) ? t("{n} Sätze · {kg} kg", { n: all.length, kg: num(Math.round(volume(all))) }) : t("{n} Sätze", { n: all.length })}</span></div></div>`;
     for (const x of runExercises(run)) {
       const logged = setsOf(run.id, x.id);
       const prev = lastSets(x.id, run.id);
@@ -119,18 +190,16 @@ export function createTraining(ctx) {
       html += `<div class="card ex-card ${allDone ? "complete" : ""}" data-run-ex="${x.id}">
         <div class="ex-top"><button type="button" class="fig-btn" data-ex="${x.id}" aria-label="${esc(x.name)}">${figureSvg(x.pattern, { size: 92 })}</button>
           <div><h3>${esc(x.name)}</h3><p class="small muted">${prev ? t("Letztes Mal: {x}", { x: prev.sets.map(fmtSet).join(" · ") }) : t("Erstes Mal")}</p></div></div>
-        <div class="set-grid"><span>${t("Satz")}</span><span>kg</span><span>${t("Wdh.")}</span><span></span>`;
+        <div class="set-grid" style="grid-template-columns: 40px repeat(${FIELDS[modeOf(x)].length}, 1fr) 48px"><span>${t("Satz")}</span>${FIELDS[modeOf(x)].map((f) => `<span>${t(f.label)}</span>`).join("")}<span></span>`;
       for (let i = 0; i < rows; i++) {
         const s = logged[i];
         const ph = prev?.sets[i] ?? logged[logged.length - 1] ?? prev?.sets[prev.sets.length - 1];
         const d = T.draft[x.id]?.[i] ?? {};
         if (s) {
-          html += `<span class="set-no done">${i + 1}</span><span class="set-val">${num(s.kg)}</span><span class="set-val">${s.reps ?? ""}</span>
+          html += `<span class="set-no done">${i + 1}</span>${FIELDS[modeOf(x)].map((f) => `<span class="set-val">${num(fieldVal(s, f))}</span>`).join("")}
             <button type="button" class="check on" data-unlog="${s.id}" aria-label="${t("Nicht erledigt")}"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button>`;
         } else {
-          html += `<span class="set-no">${i + 1}</span>
-            <input class="set-in" inputmode="decimal" data-draft="${x.id}:${i}:kg" value="${esc(d.kg ?? "")}" placeholder="${esc(num(ph?.kg))}" aria-label="kg">
-            <input class="set-in" inputmode="numeric" data-draft="${x.id}:${i}:reps" value="${esc(d.reps ?? "")}" placeholder="${esc(ph?.reps ?? "")}" aria-label="${t("Wdh.")}">
+          html += `<span class="set-no">${i + 1}</span>${FIELDS[modeOf(x)].map((f) => `<input class="set-in" inputmode="${f.dec ? "decimal" : "numeric"}" data-draft="${x.id}:${i}:${f.k}" value="${esc(d[f.k] ?? "")}" placeholder="${esc(num(fieldVal(ph, f)))}" aria-label="${t(f.label)}">`).join("")}
             <button type="button" class="check" data-log="${x.id}:${i}" aria-label="${t("Satz speichern")}"></button>`;
         }
       }
@@ -155,18 +224,18 @@ export function createTraining(ctx) {
     window.scrollTo(0, 0);
   }
 
-  async function logSet(exId, kg, reps, { quiet = false } = {}) {
+  async function logSet(exId, vals, { quiet = false } = {}) {
     let run = active();
     if (!run) { await start(); run = active(); }
     if (!run) return;
     const set_no = setsOf(run.id, exId).length + 1;
-    const { data, error } = await db.from("workout_sets").insert({ session_id: run.id, exercise_id: exId, set_no, kg, reps }).select().single();
+    const { data, error } = await db.from("workout_sets").insert({ session_id: run.id, exercise_id: exId, set_no, ...vals }).select().single();
     if (error) return toast(error.message);
     T.sets.unshift(data);
     T.lastEx = exId;
     if (navigator.vibrate) navigator.vibrate(10);
     const x = exById(exId);
-    startRest(x?.rest_sec ?? 90);
+    if ((x?.rest_sec ?? 90) > 0) startRest(x?.rest_sec ?? 90);
     if (!quiet) rerender();
     return data;
   }
@@ -193,7 +262,8 @@ export function createTraining(ctx) {
     run.finished_at = finished_at;
     stopRest();
     await ctx.onFinish?.(run);
-    toast(t("Training gespeichert: {n} Sätze, {kg} kg bewegt", { n: all.length, kg: num(Math.round(volume(all))) }));
+    const vol = Math.round(volume(all));
+    toast(vol ? t("Training gespeichert: {n} Sätze, {kg} kg bewegt", { n: all.length, kg: num(vol) }) : t("Training gespeichert: {n} Sätze", { n: all.length }));
     rerender();
   }
 
@@ -253,11 +323,17 @@ export function createTraining(ctx) {
     }));
     host.querySelectorAll("[data-log]").forEach((b) => (b.onclick = async () => {
       const [id, i] = b.dataset.log.split(":");
-      const kgIn = host.querySelector(`[data-draft="${id}:${i}:kg"]`), repIn = host.querySelector(`[data-draft="${id}:${i}:reps"]`);
-      const kg = parseNum(kgIn.value || kgIn.placeholder), reps = parseNum(repIn.value || repIn.placeholder);
-      if (kg == null && reps == null) { kgIn.focus(); return toast(t("Bitte kg und Wiederholungen eintragen")); }
+      const vals = {};
+      let first = null;
+      for (const f of FIELDS[modeOf(exById(id))]) {
+        const inp = host.querySelector(`[data-draft="${id}:${i}:${f.k}"]`);
+        first ??= inp;
+        const v = parseNum(inp.value || inp.placeholder.replace(/\./g, ""));
+        vals[f.k] = v == null ? null : f.scale ? Math.round(v * f.scale) : f.dec ? v : Math.round(v);
+      }
+      if (Object.values(vals).every((v) => v == null)) { first?.focus(); return toast(t("Bitte Werte eintragen")); }
       if (T.draft[id]) delete T.draft[id][i];
-      await logSet(id, kg, reps == null ? null : Math.round(reps));
+      await logSet(id, vals);
     }));
     host.querySelectorAll("[data-unlog]").forEach((b) => (b.onclick = () => unlog(b.dataset.unlog)));
     host.querySelectorAll("[data-add-row]").forEach((b) => (b.onclick = () => { T.extraRows[b.dataset.addRow] = (T.extraRows[b.dataset.addRow] ?? 0) + 1; rerender(); }));
@@ -267,32 +343,32 @@ export function createTraining(ctx) {
   }
 
   // ---------- Übung: Verlauf und Fortschritt ----------
-  function progressSvg(points) {
+  function progressSvg(points, u = "kg") {
     if (points.length < 2) return "";
     const W = 300, H = 110, P = 18;
     const ys = points.map((p) => p.kg), min = Math.min(...ys), max = Math.max(...ys), span = max - min || 1;
     const xy = points.map((p, i) => [P + (i * (W - 2 * P)) / (points.length - 1), H - P - ((p.kg - min) / span) * (H - 2 * P)]);
     return `<svg class="progress" viewBox="0 0 ${W} ${H}" role="img" aria-label="${t("Fortschritt")}">
       <polyline points="${xy.map((p) => p.join(",")).join(" ")}" />
-      ${xy.map(([x, y], i) => `<circle cx="${x}" cy="${y}" r="4"><title>${fmtDay(points[i].date)}: ${num(points[i].kg)} kg</title></circle>`).join("")}
-      <text x="${P}" y="12">${num(max)} kg</text><text x="${P}" y="${H - 2}">${num(min)} kg</text>
+      ${xy.map(([x, y], i) => `<circle cx="${x}" cy="${y}" r="4"><title>${fmtDay(points[i].date)}: ${num(points[i].kg)} ${u}</title></circle>`).join("")}
+      <text x="${P}" y="12">${num(max)} ${u}</text><text x="${P}" y="${H - 2}">${num(min)} ${u}</text>
     </svg>`;
   }
 
   function openExercise(x) {
     if (!x) return;
     const sessions = T.sessions.filter((s) => T.sets.some((y) => y.session_id === s.id && y.exercise_id === x.id));
-    const points = sessions.slice(0, 12).reverse().map((s) => ({ date: isoDate(new Date(s.started_at)), kg: Math.max(0, ...setsOf(s.id, x.id).map((y) => Number(y.kg) || 0)) }));
-    const best = Math.max(0, ...T.sets.filter((s) => s.exercise_id === x.id).map((s) => Number(s.kg) || 0));
+    const best = metric(x, T.sets.filter((s) => s.exercise_id === x.id));
+    const points = sessions.slice(0, 12).reverse().map((s) => ({ date: isoDate(new Date(s.started_at)), kg: metric(x, setsOf(s.id, x.id)).v }));
     form.innerHTML = `<div class="ex-hero">${figureSvg(x.pattern, { size: 220 })}</div>
       <h3 class="detail-title">${esc(x.name)}</h3>
       ${x.notes ? `<p class="small">${esc(x.notes).replace(/\n/g, "<br>")}</p>` : ""}
       <dl class="details">
-        <dt>${t("Bestwert")}</dt><dd>${best ? num(best) + " kg" : "–"}</dd>
+        <dt>${t("Bestwert")}</dt><dd>${best.v ? num(best.v) + " " + best.u : "–"}</dd>
         <dt>${t("Standard")}</dt><dd>${t("{n} Sätze · {s} s Pause", { n: x.sets, s: x.rest_sec })}</dd>
         <dt>${t("Trainings")}</dt><dd>${sessions.length}</dd>
       </dl>
-      ${points.length > 1 ? `<p class="eyebrow" style="margin-top:14px">${t("Höchstes Gewicht je Training")}</p>${progressSvg(points)}` : ""}
+      ${points.length > 1 ? `<p class="eyebrow" style="margin-top:14px">${t(best.u === "kg" ? "Höchstes Gewicht je Training" : "Bester Wert je Training")}</p>${progressSvg(points, best.u)}` : ""}
       ${sessions.length ? `<p class="eyebrow" style="margin-top:14px">${t("Verlauf")}</p>
         <div class="ex-hist">${sessions.slice(0, 20).map((s) => `<div><span class="small muted">${fmtDay(isoDate(new Date(s.started_at)))}</span><span>${setsOf(s.id, x.id).map(fmtSet).join(" · ")}</span></div>`).join("")}</div>` : ""}
       <button type="button" class="ghost" id="ex-edit">${t("Bearbeiten")}</button>`;
@@ -308,9 +384,11 @@ export function createTraining(ctx) {
       <input name="name" placeholder="${t("Name, z. B. Latziehen")}" required value="${esc(x.name)}">
       <label>${t("Bild")}</label>
       <div class="fig-pick">${Object.entries(PATTERNS).map(([k, p]) => `<button type="button" data-pat="${k}" class="${k === pattern ? "on" : ""}" aria-label="${esc(t(p.label))}">${figureSvg(k, { size: 72, animate: false })}<span>${esc(t(p.label))}</span></button>`).join("")}</div>
+      <label>${t("Erfassung")}</label>
+      <select name="mode">${[["reps", "kg und Wiederholungen"], ["time", "Zeit in Sekunden"], ["cardio", "Cardio: Minuten, km/h, Steigung"]].map(([v, n]) => `<option value="${v}" ${modeOf(x) === v ? "selected" : ""}>${t(n)}</option>`).join("")}</select>
       <div class="row">
         <div><label>${t("Sätze")}</label><input name="sets" type="number" inputmode="numeric" min="1" max="10" value="${x.sets ?? 3}"></div>
-        <div><label>${t("Pause")}</label><select name="rest_sec">${[45, 60, 90, 120, 180].map((s) => `<option value="${s}" ${(x.rest_sec ?? 90) === s ? "selected" : ""}>${s} s</option>`).join("")}</select></div>
+        <div><label>${t("Pause")}</label><select name="rest_sec">${[0, 45, 60, 90, 120, 180].map((s) => `<option value="${s}" ${(x.rest_sec ?? 90) === s ? "selected" : ""}>${s ? s + " s" : t("keine")}</option>`).join("")}</select></div>
       </div>
       <label>${t("Notiz")}</label><textarea name="notes" rows="2" placeholder="${t("z. B. Sitzhöhe 4, Griff breit")}">${esc(x.notes)}</textarea>
       <div class="sheet-actions"><button class="primary" value="save">${t("Speichern")}</button></div>
@@ -318,12 +396,14 @@ export function createTraining(ctx) {
       <button type="button" class="ghost" id="ex-cancel">${t("Abbrechen")}</button>`;
     form.querySelectorAll("[data-pat]").forEach((b) => (b.onclick = () => {
       pattern = b.dataset.pat;
+      const auto = { side_plank: "time", treadmill: "cardio" }[pattern];
+      if (auto && !x.id) form.querySelector("[name=mode]").value = auto;
       form.querySelectorAll("[data-pat]").forEach((y) => y.classList.toggle("on", y === b));
     }));
     form.onsubmit = async (e) => {
       e.preventDefault();
       const f = new FormData(form);
-      const row = { name: f.get("name").trim(), pattern, sets: Number(f.get("sets") || 3), rest_sec: Number(f.get("rest_sec") || 90), notes: f.get("notes").trim() || null };
+      const row = { name: f.get("name").trim(), pattern, mode: f.get("mode") || "reps", sets: Number(f.get("sets") || 3), rest_sec: Number(f.get("rest_sec") || 90), notes: f.get("notes").trim() || null };
       const res = x.id ? await db.from("exercises").update(row).eq("id", x.id).select().single() : await db.from("exercises").insert(row).select().single();
       if (res.error) return toast(res.error.message);
       if (x.id) Object.assign(x, res.data); else T.exercises.push(res.data);
@@ -393,9 +473,11 @@ export function createTraining(ctx) {
     if (c.action === "stop") { await finish(); return null; }
     const exId = c.exercise?.id ?? (active() && T.lastEx) ?? null;
     if (!exId) return t("Welche Übung? Sag z. B. „Latziehen 50 kg 12 Wiederholungen“.");
-    for (let k = 0; k < (c.sets ?? 1); k++) await logSet(exId, c.kg ?? null, c.reps ?? null, { quiet: true });
+    const vals = { kg: c.kg ?? null, reps: c.reps ?? null };
+    for (const k of ["duration_sec", "speed", "incline"]) if (c[k] != null) vals[k] = c[k];
+    for (let k = 0; k < (c.sets ?? 1); k++) await logSet(exId, vals, { quiet: true });
     rerender();
-    return `${exById(exId)?.name}: ${c.sets > 1 ? c.sets + " × " : ""}${c.kg != null ? num(c.kg) + " kg" : ""}${c.reps != null ? " × " + c.reps : ""}`;
+    return `${exById(exId)?.name}: ${c.sets > 1 ? c.sets + " × " : ""}${fmtSet({ ...vals, exercise_id: exId })}`;
   }
 
   return {

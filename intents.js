@@ -109,7 +109,7 @@ export function parseIntent(text, now = new Date(), targets = [], lang = "de", s
   const sup = supplyIntent(s, supplies, lang);
   if (sup) return sup;
 
-  const tr = trainingIntent(s, training);
+  const tr = RE.erinnerung.test(s) || isNew ? null : trainingIntent(s, training);
   if (tr) return tr;
 
   // Checkliste: "füge Milch zur Einkaufsliste hinzu" / "Alışveriş listesine süt ekle"
@@ -248,6 +248,15 @@ const EX_ALIAS = {
   skullcrusher: "sz stirn stirndrücken french press skull alın ez bar",
   curl: "bizeps curl biceps pazı",
   bench: "bank bankdrücken bench göğüs press",
+  face_pull: "face pulls facepull gesicht seil hintere schulter yüz halat arka omuz",
+  hyperext: "hyperextension hyperextensions rückenstrecker unterer rücken bel sırt ekstansiyon",
+  rdl: "rumänisch kreuzheben deadlift romanian rdl ölü kaldırma",
+  hip_thrust: "hip thrust glute bridge gesäß po kalça köprü",
+  reverse_fly: "reverse butterfly fly hintere schulter ters kelebek arka omuz",
+  dead_bug: "dead bug deadbug toter käfer ölü böcek",
+  side_plank: "seitstütz plank side seitlich unterarmstütz yan plank",
+  pallof: "pallof press anti rotation",
+  treadmill: "laufband bergauf bergsteigen gehen cardio koşu bandı yürüyüş eğim",
 };
 const stem5 = (w) => w.toLocaleLowerCase("de-DE").slice(0, 5);
 const STOP_W = new Set(["am", "an", "im", "in", "um", "zu", "mit", "nach", "der", "die", "das", "und", "den", "dem", "ve", "ile", "bir"]);
@@ -277,6 +286,16 @@ function trainingIntent(s, { exercises = [], workouts = [], running = false } = 
   if ((m = s.match(rx(`(\\d+(?:[.,]\\d+)?)\\s*(?:kg|kilo${W}|kilogramm)`)))) kg = Number(m[1].replace(",", "."));
   if (reps == null && (m = s.match(rx(`(\\d{1,3})\\s*(?:mal|wiederholung${W}|wdh|reps?|tekrar${W}|kere)`)))) reps = +m[1];
   if (sets == null && (m = s.match(rx(`(\\d{1,2})\\s*(?:sätze|satz|sets?|seri${W}|set)`)))) sets = +m[1];
+  // Zeit und Cardio: "45 Sekunden", "10 Minuten", "Steigung 10", "5 km/h"
+  let duration_sec = null, speed = null, incline = null;
+  if ((m = s.match(rx(`(\\d{1,4})\\s*(?:sek${W}|s|saniye${W})`)))) duration_sec = +m[1];
+  if ((m = s.match(rx(`(\\d{1,3}(?:[.,]\\d+)?)\\s*(?:min${W}|dakika${W}|dk)`)))) duration_sec = Math.round(Number(m[1].replace(",", ".")) * 60);
+  if ((m = s.match(/(\d{1,2}(?:[.,]\d+)?)\s*(?:km\/?h|km\s*pro\s*stunde|kilometer)/iu))) speed = Number(m[1].replace(",", "."));
+  if ((m = s.match(/(?:steigung|eğim|incline)\s*(?:von\s*)?(\d{1,2}(?:[.,]\d+)?)|(\d{1,2}(?:[.,]\d+)?)\s*(?:%|prozent)/iu))) incline = Number((m[1] ?? m[2]).replace(",", "."));
+  if (kg == null && reps == null && (duration_sec != null || speed != null || incline != null)) {
+    const exercise = findExercise(s.replace(/\d+(?:[.,]\d+)?/g, " "), exercises);
+    if (exercise || running) return { type: "training", action: "log", exercise, kg: null, reps: null, duration_sec, speed, incline, sets: sets ?? 1 };
+  }
   // "35 kg 10": die übrige Zahl sind die Wiederholungen
   if (kg != null && reps == null) {
     const rest = s.replace(rx(`(\\d+(?:[.,]\\d+)?)\\s*(?:kg|kilo${W}|kilogramm)`), " ").replace(rx(`(\\d{1,2})\\s*(?:sätze|satz|sets?|seri${W}|set)`), " ").match(/\b(\d{1,3})\b/);
