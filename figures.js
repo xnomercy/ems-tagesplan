@@ -120,6 +120,21 @@ export const PATTERNS = {
     a: { foot: [106, 92], hip: [66, 82], neck: [30, 60], head: [22, 54], elbow: [32, 92], h: [46, 92], e2: [40, 70], h2: [52, 78] },
     b: { foot: [106, 92], hip: [66, 72], neck: [30, 58], head: [22, 52], elbow: [32, 92], h: [46, 92], e2: [42, 66], h2: [56, 70] },
   },
+  dead_hang: {
+    label: "Hängen an der Stange",
+    // Front: erst locker hängen, dann Schultern aktiv nach unten ziehen (Körper hebt sich leicht)
+    parts: [[FR, [16, 8], [104, 8]], [FR, [16, 8], [16, 96]], [FR, [104, 8], [104, 96]], [FIG, "neck", "hip"], [FIG, "hip", "lk"], [FIG, "lk", "lf"], [FIG, "hip", "rk"], [FIG, "rk", "rf"],
+      [FIG, "ls", "rs"], [FIG, "ls", "le"], [FIG, "le", "lh"], [FIG, "rs", "re"], [FIG, "re", "rh"]],
+    a: { head: [60, 30], neck: [60, 38], ls: [52, 34], rs: [68, 34], le: [46, 22], lh: [42, 9], re: [74, 22], rh: [78, 9], hip: [60, 68], lk: [56, 82], lf: [55, 96], rk: [64, 82], rf: [65, 96] },
+    b: { head: [60, 27], neck: [60, 35], ls: [51, 36], rs: [69, 36], le: [45, 23], lh: [42, 9], re: [75, 23], rh: [78, 9], hip: [60, 65], lk: [56, 79], lf: [55, 93], rk: [64, 79], rf: [65, 93] },
+  },
+  neck_curl: {
+    label: "Nacken-Curl liegend",
+    // Rückenlage, Kopf über dem Bankende: Kopf hängen lassen, dann Kinn Richtung Brust heben
+    parts: [[FR, [30, 70], [100, 70]], [FR, [36, 70], [36, 96]], [FR, [94, 70], [94, 96]], [FIG, "neck", "head"], [FIG, "neck", "hip"], [FIG, "hip", "knee"], [FIG, "knee", "foot"], [FIG, "neck", "elbow"], [FIG, "elbow", "h"]],
+    a: { head: [20, 80], neck: [34, 64], hip: [76, 64], knee: [90, 46], foot: [102, 66], elbow: [50, 56], h: [42, 58] },
+    b: { head: [32, 48], neck: [34, 64], hip: [76, 64], knee: [90, 46], foot: [102, 66], elbow: [50, 56], h: [42, 58] },
+  },
   plank: {
     label: "Unterarmstütz (Plank)",
     // Körper bleibt eine Linie, die Hüfte pendelt nur leicht

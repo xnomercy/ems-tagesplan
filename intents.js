@@ -109,6 +109,9 @@ export function parseIntent(text, now = new Date(), targets = [], lang = "de", s
   const sup = supplyIntent(s, supplies, lang);
   if (sup) return sup;
 
+  const body = bodyIntent(s);
+  if (body && !isNew) return body;
+
   const tr = RE.erinnerung.test(s) || isNew ? null : trainingIntent(s, training);
   if (tr) return tr;
 
@@ -233,6 +236,15 @@ function supplyIntent(s, supplies, lang) {
   return null;
 }
 
+// ---------- Körperwerte: "Gewicht 99,5", "ich wiege 99,5 kg", "Bauchumfang 104", "kilom 99,5", "bel çevrem 104" ----------
+function bodyIntent(s) {
+  const NUM = "(\\d{2,3}(?:[.,]\\d)?)";
+  const w = s.match(rx(`(?:(?:mein\\s+|körper)?gewicht(?:\\s+(?:ist|heute|beträgt))?|ich\\s+wiege(?:\\s+heute)?|kilom(?:\\s+bugün)?|tartıldım|ağırlığım)\\s*:?\\s*${NUM}`)) ?? s.match(rx(`${NUM}\\s*(?:kg|kilo)\\s+(?:gewogen|wiege|tartıldım|geldim)`));
+  const u = s.match(rx(`(?:bauch(?:umfang)?|taille|bel(?:\\s+çevre${W}|\\s+ölçü${W})?)\\s*:?\\s*${NUM}\\s*(?:cm|zentimeter|santim${W})?`));
+  if (!w && !u) return null;
+  return { type: "training", action: "body", weight_kg: w ? Number(w[1].replace(",", ".")) : null, waist_cm: u ? Number(u[1].replace(",", ".")) : null };
+}
+
 // ---------- Training: "Starte Training", "Latziehen 50 kg 12 Wiederholungen", "3x12 mit 40 kg Seil runter", "Training beenden" ----------
 const TRAIN_WORD = rx(`\\p{L}*training${W}|workout|gym|fitness|antrenman${W}|spor${W}|idman${W}`);
 const START = rx(`start${W}|beginn${W}|anfangen|fang${W}\\s+an|los\\s+geht${W}|başla${W}|başlat${W}`);
@@ -260,6 +272,8 @@ const EX_ALIAS = {
   dead_bug: "dead bug deadbug toter käfer ölü böcek",
   side_plank: "seitstütz side seitlich seite yan",
   plank: "plank planke unterarmstütz stütz brett",
+  neck_curl: "nacken nackencurl hals kopf neck curl boyun",
+  dead_hang: "hängen hang dead stange klimmzugstange barfiks asılma asılı",
   situp: "sit ups situps situp crunch crunches bauchpresse mekik",
   pallof: "pallof press anti rotation",
   treadmill: "laufband bergauf bergsteigen gehen cardio koşu bandı yürüyüş eğim",
@@ -285,6 +299,7 @@ function trainingIntent(s, { exercises = [], workouts = [], running = false } = 
   const hasTrainWord = TRAIN_WORD.test(s);
   const workout = workouts.find((w) => words(w.name).filter((x) => x.length > 2).some((x) => rx(x.replace(/[^\p{L}\d]/gu, "")).test(s)));
   if (STOP.test(s) && (hasTrainWord || running) && !/\d/.test(s)) return { type: "training", action: "stop" };
+  if (rx(`fortsetz${W}|setz${W}\\s+(?:das\\s+)?training\\s+fort|weiter\\s*machen|weitertrainieren|devam${W}`).test(s) && hasTrainWord) return { type: "training", action: "resume" };
   if (START.test(s) && (hasTrainWord || workout)) return { type: "training", action: "start", workout: workout ?? null };
   // "Zeig die Analyse", "Trainingsauswertung", "antrenman analizi"
   if (ANALYSE.test(s) || (rx(`fortschritt${W}|ilerleme${W}`).test(s) && hasTrainWord)) return { type: "training", action: "analysis" };
@@ -305,6 +320,9 @@ function trainingIntent(s, { exercises = [], workouts = [], running = false } = 
   if ((m = s.match(rx(`(\\d+(?:[.,]\\d+)?)\\s*(?:kg|kilo${W}|kilogramm)`)))) kg = Number(m[1].replace(",", "."));
   if (reps == null && (m = s.match(rx(`(\\d{1,3})\\s*(?:mal|wiederholung${W}|wdh|reps?|tekrar${W}|kere)`)))) reps = +m[1];
   if (sets == null && (m = s.match(rx(`(\\d{1,2})\\s*(?:sätze|satz|sets?|seri${W}|set)`)))) sets = +m[1];
+  // Reserve: "RIR 2", "2 in Reserve", "2 übrig", "2 yedek"
+  let rir = null;
+  if ((m = s.match(rx(`(?:rir|reserve)\\s*(\\d)|(\\d)\\s*(?:rir|in\\s+reserve|übrig|yedek${W}|rezerv${W})`)))) { rir = Number(m[1] ?? m[2]); s = s.replace(m[0], " "); }
   // Zeit und Cardio: "45 Sekunden", "10 Minuten", "Steigung 10", "5 km/h"
   let duration_sec = null, speed = null, incline = null;
   if ((m = s.match(rx(`(\\d{1,4})\\s*(?:sek${W}|s|saniye${W})`)))) duration_sec = +m[1];
@@ -324,5 +342,5 @@ function trainingIntent(s, { exercises = [], workouts = [], running = false } = 
   const clean = s.replace(/\d+(?:[.,]\d+)?/g, " ");
   const exercise = findExercise(clean, exercises);
   if (!exercise && !running) return null;
-  return { type: "training", action: "log", exercise, kg, reps, sets: sets ?? 1 };
+  return { type: "training", action: "log", exercise, kg, reps, sets: sets ?? 1, rir };
 }

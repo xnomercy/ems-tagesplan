@@ -491,4 +491,27 @@ svg.bars { width: 100%; height: auto; background: var(--card); border-radius: 14
 .an-ex .badge { align-self: flex-start; }
 .badge.warn { background: #FDECE3; color: var(--danger); }
 .an-days div { display: flex; flex-direction: column; gap: 2px; padding: 9px 0; border-bottom: 1px solid var(--soft); }
-.ex-foot { display: flex; align-items: center; justify-content: space-between; }
+.ex-foot { display: flex; align-items: center; gap: 18px; }
+.ex-foot .ex-rm { margin-left: auto; }
+
+/* v21: Reserve (RIR), Kurz-Check, Körper, Ampel */
+.set-val small.rir { display: block; font-size: 11px; font-weight: 700; color: var(--muted); margin-top: -2px; }
+button.set-no { border: 0; font: inherit; font-weight: 800; color: #fff; }
+.rir-ask { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; background: var(--soft); border-radius: 12px; padding: 8px 10px; }
+.rir-ask span { font-size: 13px; font-weight: 700; }
+.rir-ask div { display: flex; gap: 6px; }
+.rir-ask button { flex: 1; min-height: 38px; border: 0; border-radius: 10px; background: var(--card); color: var(--text); font: inherit; font-weight: 800; }
+.rir-ask button.on { background: var(--petrol); color: #fff; }
+.chips.ci { margin-bottom: 6px; flex-wrap: wrap; overflow-x: visible; padding-top: 8px; }
+.chip.on { background: var(--petrol); color: #fff; border-color: var(--petrol); }
+.ci-btn { margin: 4px 0 8px; border: 1.5px dashed var(--line) !important; border-radius: 14px; color: var(--petrol) !important; }
+.gauge i { position: relative; }
+.gauge i em { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--card); }
+.gauge i b.high { background: var(--petrol); }
+.an-tip.ok i { background: var(--done-bg); color: var(--done); }
+.body-card { display: flex; flex-direction: column; gap: 6px; }
+.body-card .btn { margin: 4px 0; }
+.body-card p { margin: 0; }
+.resume-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.resume-card > span { display: flex; flex-direction: column; gap: 2px; }
+.resume-card .btn { flex: none; width: auto; min-width: 0; padding: 10px 18px; margin: 0; }
