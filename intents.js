@@ -246,7 +246,7 @@ const EX_ALIAS = {
   lat_wide: "latziehen lat breit weit lange stange wide geniş uzun bar çekme",
   lat_close: "latziehen lat eng enge kurze stange close dar yakın çekme",
   row_incline: "rudern ruder rudermaschine schräg liegend brust row kürek eğimli göğüs",
-  row_single: "einarmig einzeln einer arm maschine sitzend griffe tek kol oturarak",
+  row_single: "einarmig einzeln einer arm maschine sitzend griffe brustauflage brust polster iso lateral rudern tek kol oturarak göğüs destekli kürek",
   pushdown: "trizeps seil runter unten drücken pushdown triceps triseps halat aşağı",
   overhead_ext: "trizeps seil vorne überkopf nach vorne triceps triseps halat öne baş üstü",
   skullcrusher: "sz stirn stirndrücken french press skull alın ez bar",

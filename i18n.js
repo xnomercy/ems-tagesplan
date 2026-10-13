@@ -368,6 +368,7 @@ const TR = {
   "Latziehen eng": "Dar tutuş lat çekme",
   "Rudern schräg (Brust aufgelegt)": "Eğimli kürek (göğüs destekli)",
   "Einarmig ziehen sitzend": "Oturarak tek kol çekiş",
+  "Rudern einarmig mit Brustauflage": "Göğüs destekli tek kol kürek",
   "Trizeps am Seil nach unten": "Halatla triseps aşağı itiş",
   "Trizeps am Seil nach vorne": "Halatla triseps öne itiş",
   "SZ-Stirndrücken": "EZ bar alın ezme",

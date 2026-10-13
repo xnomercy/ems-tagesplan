@@ -32,11 +32,12 @@ export const PATTERNS = {
     b: { head: [86, 38], neck: [78, 45], hip: [42, 70], knee: [40, 88], foot: [28, 96], elbow: [62, 44], h: [76, 62], h1: [72, 62], h2: [80, 62] },
   },
   row_single: {
-    label: "Einarmig ziehen sitzend",
-    parts: [[FR, [26, 76], [56, 76]], [FR, [41, 76], [41, 96]], [FR, [72, 40], [72, 66]], [EQ, [108, 34], "h"], [EQ, "h1", "h2"],
+    label: "Rudern einarmig mit Brustauflage",
+    // aufrecht sitzend, Brust am Polster, Griff vorne auf Brusthöhe nach hinten ziehen
+    parts: [[FR, [24, 76], [54, 76]], [FR, [39, 76], [39, 96]], [FR, [66, 32], [66, 66]], [FR, [66, 66], [66, 96]], [EQ, [108, 92], "h"], [EQ, "h1", "h2"],
       [FIG, "neck", "hip"], [FIG, "hip", "knee"], [FIG, "knee", "foot"], [FIG, "neck", "elbow"], [FIG, "elbow", "h"]],
-    a: { head: [52, 28], neck: [50, 37], hip: [44, 72], knee: [64, 72], foot: [64, 94], elbow: [64, 24], h: [80, 12], h1: [80, 6], h2: [80, 18] },
-    b: { head: [52, 28], neck: [50, 37], hip: [44, 72], knee: [64, 72], foot: [64, 94], elbow: [38, 54], h: [56, 46], h1: [56, 40], h2: [56, 52] },
+    a: { head: [60, 28], neck: [57, 37], hip: [44, 72], knee: [62, 76], foot: [60, 96], elbow: [78, 44], h: [98, 46], h1: [98, 40], h2: [98, 52] },
+    b: { head: [60, 28], neck: [57, 37], hip: [44, 72], knee: [62, 76], foot: [60, 96], elbow: [40, 44], h: [70, 46], h1: [70, 40], h2: [70, 52] },
   },
   pushdown: {
     label: "Trizeps am Seil nach unten",

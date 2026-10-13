@@ -7,7 +7,7 @@ const SEED = [
   ["Latziehen breit (lange Stange)", "lat_wide"],
   ["Latziehen eng (enge Stange)", "lat_close"],
   ["Rudern schräg, Brust aufgelegt", "row_incline"],
-  ["Einarmig ziehen sitzend (Maschine)", "row_single"],
+  ["Rudern einarmig mit Brustauflage (Maschine)", "row_single"],
   ["Trizeps am Seil nach unten", "pushdown"],
   ["Trizeps am Seil nach vorne", "overhead_ext"],
   ["SZ-Stirndrücken", "skullcrusher"],
