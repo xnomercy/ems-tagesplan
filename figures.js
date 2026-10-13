@@ -120,6 +120,19 @@ export const PATTERNS = {
     a: { foot: [106, 92], hip: [66, 82], neck: [30, 60], head: [22, 54], elbow: [32, 92], h: [46, 92], e2: [40, 70], h2: [52, 78] },
     b: { foot: [106, 92], hip: [66, 72], neck: [30, 58], head: [22, 52], elbow: [32, 92], h: [46, 92], e2: [42, 66], h2: [56, 70] },
   },
+  plank: {
+    label: "Unterarmstütz (Plank)",
+    // Körper bleibt eine Linie, die Hüfte pendelt nur leicht
+    parts: [[FR, [4, 94], [116, 94]], [FIG, "foot", "knee"], [FIG, "knee", "hip"], [FIG, "hip", "neck"], [FIG, "neck", "elbow"], [FIG, "elbow", "h"]],
+    a: { head: [20, 66], neck: [30, 72], hip: [68, 78], knee: [88, 84], foot: [108, 91], elbow: [30, 92], h: [46, 92] },
+    b: { head: [20, 65], neck: [30, 71], hip: [68, 75], knee: [88, 83], foot: [108, 91], elbow: [30, 92], h: [46, 92] },
+  },
+  situp: {
+    label: "Sit-ups",
+    parts: [[FR, [4, 94], [116, 94]], [FIG, "neck", "hip"], [FIG, "hip", "knee"], [FIG, "knee", "foot"], [FIG, "neck", "elbow"], [FIG, "elbow", "h"]],
+    a: { head: [16, 84], neck: [26, 86], hip: [62, 88], knee: [80, 64], foot: [98, 90], elbow: [38, 77], h: [30, 81] },
+    b: { head: [50, 46], neck: [50, 56], hip: [62, 88], knee: [80, 64], foot: [98, 90], elbow: [64, 64], h: [56, 60] },
+  },
   pallof: {
     label: "Pallof Press",
     parts: [[FR, [8, 2], [8, 96]], [EQ, [8, 40], "h"],

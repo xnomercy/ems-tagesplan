@@ -258,7 +258,9 @@ const EX_ALIAS = {
   hip_thrust: "hip thrust glute bridge gesäß po kalça köprü",
   reverse_fly: "reverse butterfly fly hintere schulter ters kelebek arka omuz",
   dead_bug: "dead bug deadbug toter käfer ölü böcek",
-  side_plank: "seitstütz plank side seitlich unterarmstütz yan plank",
+  side_plank: "seitstütz side seitlich seite yan",
+  plank: "plank planke unterarmstütz stütz brett",
+  situp: "sit ups situps situp crunch crunches bauchpresse mekik",
   pallof: "pallof press anti rotation",
   treadmill: "laufband bergauf bergsteigen gehen cardio koşu bandı yürüyüş eğim",
 };

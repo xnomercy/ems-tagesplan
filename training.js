@@ -26,6 +26,12 @@ const EXTRA = [
   ["Laufband bergauf", "treadmill", "cardio", 1, 0, "8 bis 12 % Steigung, 4,5 bis 5,5 km/h, nicht festhalten"],
 ];
 const EXTRA_KEY = "tagesplan-train-v2";
+// Ergänzung vom 2026-10-13 (2): Plank und Sit-ups für den Bauch
+const EXTRA3 = [
+  ["Unterarmstütz (Plank)", "plank", "time", 3, 45, "Ellbogen unter den Schultern, Bauch und Po fest, kein Hohlkreuz"],
+  ["Sit-ups", "situp", "reps", 3, 45, "Füße am Boden, langsam abrollen, nicht am Kopf ziehen"],
+];
+const EXTRA3_KEY = "tagesplan-train-v3";
 // Pro laufendem Training: entfernte und dazugenommene Übungen (überlebt Neuladen)
 const RUN_KEY = "tagesplan-train-run";
 
@@ -96,6 +102,31 @@ export function createTraining(ctx) {
     T.loaded = true;
     if (!T.exercises.length && !T.workouts.length) await seed();
     await seedExtras();
+    await seedExtras3();
+  }
+
+  // Plank und Sit-ups einmalig anlegen und in den Plan Core + Stabi nach dem Dead Bug einsortieren
+  async function seedExtras3() {
+    try { if (localStorage.getItem(EXTRA3_KEY)) return; } catch {}
+    const have = new Set(T.exercises.map((x) => x.name.toLowerCase()));
+    const missing = EXTRA3.filter(([n]) => !have.has(n.toLowerCase()));
+    if (missing.length) {
+      const { data, error } = await db.from("exercises").insert(missing.map(([name, pattern, mode, sets, rest_sec, notes]) => ({ name, pattern, mode, sets, rest_sec, notes }))).select();
+      if (error) return;
+      T.exercises.push(...(data ?? []));
+    }
+    const core = T.workouts.find((w) => /core/i.test(w.name));
+    if (core) {
+      const add = EXTRA3.map(([n]) => T.exercises.find((x) => x.name.toLowerCase() === n.toLowerCase())?.id).filter((id) => id && !core.exercise_ids.includes(id));
+      if (add.length) {
+        const ids = [...core.exercise_ids];
+        const at = ids.findIndex((id) => exById(id)?.pattern === "dead_bug");
+        ids.splice(at < 0 ? 0 : at + 1, 0, ...add);
+        const { data } = await db.from("workouts").update({ exercise_ids: ids }).eq("id", core.id).select().single();
+        core.exercise_ids = data?.exercise_ids ?? ids;
+      }
+    }
+    try { localStorage.setItem(EXTRA3_KEY, "1"); } catch {}
   }
 
   // Neue Übungen einmalig ergänzen, ohne Doppelte und ohne gelöschte zurückzuholen
@@ -546,7 +577,7 @@ export function createTraining(ctx) {
       <button type="button" class="ghost" id="ex-cancel">${t("Abbrechen")}</button>`;
     form.querySelectorAll("[data-pat]").forEach((b) => (b.onclick = () => {
       pattern = b.dataset.pat;
-      const auto = { side_plank: "time", treadmill: "cardio" }[pattern];
+      const auto = { side_plank: "time", plank: "time", treadmill: "cardio" }[pattern];
       if (auto && !x.id) form.querySelector("[name=mode]").value = auto;
       form.querySelectorAll("[data-pat]").forEach((y) => y.classList.toggle("on", y === b));
     }));

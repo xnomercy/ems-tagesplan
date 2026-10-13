@@ -479,6 +479,11 @@ const TR = {
   "Ans Ende: {x}": "Sona alındı: {x}",
   "Als Nächstes": "Sıradaki",
   "Ans Ende": "Sona al",
+  "Unterarmstütz (Plank)": "Plank (ön kol)",
+  "Sit-ups": "Mekik",
+  "Ellbogen unter den Schultern, Bauch und Po fest, kein Hohlkreuz": "Dirsekler omuzların altında, karın ve kalça sıkı, bel çukurlaşmasın",
+  "Füße am Boden, langsam abrollen, nicht am Kopf ziehen": "Ayaklar yerde, yavaşça in, başından çekme",
+  "Plank, Sit-ups oder den Plan Core + Stabi einbauen.": "Plank, mekik veya Core + Stabi planını ekle.",
   "Mo": "Pzt", "Di": "Sal", "Mi": "Çar", "Do": "Per", "Fr": "Cum", "Sa": "Cmt", "So": "Paz",
 };
 

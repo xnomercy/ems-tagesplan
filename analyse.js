@@ -7,7 +7,7 @@ export const GROUPS = {
   rear: { label: "Hintere Schulter", target: 6, patterns: ["face_pull", "reverse_fly"] },
   lower: { label: "Unterer Rücken + Gesäß", target: 6, patterns: ["hyperext", "rdl", "hip_thrust"] },
   triceps: { label: "Trizeps", target: 6, patterns: ["pushdown", "overhead_ext", "skullcrusher"] },
-  core: { label: "Bauch + Rumpf", target: 6, patterns: ["dead_bug", "side_plank", "pallof"] },
+  core: { label: "Bauch + Rumpf", target: 6, patterns: ["dead_bug", "side_plank", "pallof", "plank", "situp"] },
   cardio: { label: "Cardio", target: 2, patterns: ["treadmill"] },
   chest: { label: "Brust", target: 0, patterns: ["bench"] },
   biceps: { label: "Bizeps", target: 0, patterns: ["curl"] },
@@ -170,7 +170,7 @@ export function analyse({ exercises, sessions, sets, now = Date.now() }) {
   // Schwerpunkte des Nutzers: unterer Rücken, hintere Schulter, Bauch, Laufband
   if (stats.length) {
     for (const g of ["lower", "rear", "core"]) if (groups[g] < GROUPS[g].target)
-      tip("plan", "{g}: {n} von {t} Sätzen diese Woche. {hint}", { g: GROUPS[g].label, n: groups[g], t: GROUPS[g].target, hint: { lower: "Hyperextensions oder Rumänisches Kreuzheben einbauen.", rear: "Face Pulls oder Reverse Butterfly einbauen.", core: "Plan Core + Stabi einmal pro Woche machen." }[g] });
+      tip("plan", "{g}: {n} von {t} Sätzen diese Woche. {hint}", { g: GROUPS[g].label, n: groups[g], t: GROUPS[g].target, hint: { lower: "Hyperextensions oder Rumänisches Kreuzheben einbauen.", rear: "Face Pulls oder Reverse Butterfly einbauen.", core: "Plank, Sit-ups oder den Plan Core + Stabi einbauen." }[g] });
     if (groups.cardio < GROUPS.cardio.target) tip("plan", "Laufband bergauf: {n} von 2 Einheiten diese Woche. 10 Min. am Ende eines Trainings reichen.", { n: groups.cardio });
   }
   // Zeit
