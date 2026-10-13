@@ -3,6 +3,7 @@
 // parseIntent(text, now, ziele, lang) -> { type, ... } oder null (dann greift der normale Parser)
 import { parseDate, parseTime, findMatch } from "./parser.js";
 import { parseDateTr, parseTimeTr, findPrayer } from "./parser-tr.js";
+import { parseItems, normName } from "./einkauf.js";
 
 const B = "(?<![\\p{L}\\d])";
 const E = "(?![\\p{L}\\d])";
@@ -79,7 +80,6 @@ function dateTime(s, now, lang) {
   return { date: d.hit ? isoOf(d.date) : null, time: t.time, end: t.end ?? null };
 }
 const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-
 export function parseIntent(text, now = new Date(), targets = [], lang = "de", supplies = [], training = {}) {
   const s = text.replace(/İ/g, "i").replace(/[!?]|(?<!\d)[,.]|[,.](?!\d)/g, " ").replace(/\s+/g, " ").trim();
   if (!s) return null;
@@ -114,6 +114,9 @@ export function parseIntent(text, now = new Date(), targets = [], lang = "de", s
 
   const tr = RE.erinnerung.test(s) || isNew ? null : trainingIntent(s, training);
   if (tr) return tr;
+
+  const shop = RE.erinnerung.test(s) ? null : shopIntent(text, s, training.shop ?? [], isNew);
+  if (shop) return shop;
 
   // Checkliste: "füge Milch zur Einkaufsliste hinzu" / "Alışveriş listesine süt ekle"
   let m = s.match(/(?:füg\p{L}*|setz\p{L}*|pack\p{L}*|schreib\p{L}*)\s+(.+?)\s+(?:zur|zum|zu|auf die|auf|in die|in)\s+(.+?)(?:\s+hinzu|\s+dazu|\s+drauf|\s+rein)?$/iu);
@@ -305,6 +308,56 @@ export function findExercise(s, exercises = []) {
     if (sc > score) { best = x; score = sc; }
   }
   return score >= 2.01 ? best : null;
+}
+
+// ---------- Einkaufsliste ----------
+// "Milch, Eier und Hack auf die Einkaufsliste", "Wir brauchen Brot", "Milch gekauft", "Streich Milch von der Einkaufsliste",
+// "Zeig die Einkaufsliste", "Einkauf abschließen 45 Euro"; TR "alışveriş listesine süt ekle", "süt aldım", "alışverişi bitir"
+const LISTW = `(?:einkaufs?liste|einkaufszettel|alışveriş listesi\\p{L}*|market listesi\\p{L}*)`;
+const DATEW = /(?<!\p{L})(heute|morgen|übermorgen|bis|am|um|uhr|montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|woche|nächst\p{L}*|yarın|bugün|saat|pazartesi|salı|çarşamba|perşembe|cuma|cumartesi|pazar|hafta)(?!\p{L})|\d{1,2}[.:]\d{2}/iu;
+const SHOP_FILL = /(?<!\p{L})(?:bitte|noch|mal|auch|wir|ich|uns|mir|brauchen|brauche|müssen|muss|kaufen|kaufe|kauf|einkaufen|lazım|gerek|almam|almamız|al|alalım)(?!\p{L})/giu;
+const cleanShop = (x) => x.replace(SHOP_FILL, " ").replace(/\s+/g, " ").trim();
+
+function shopIntent(text, s, open, isNew = false) {
+  const raw = text.replace(/İ/g, "i").replace(/[!?]/g, " ").replace(/\s+/g, " ").trim();
+  const hasList = rx(LISTW).test(s);
+  // "Neue Aufgabe Milch kaufen" bleibt eine Aufgabe, außer die Einkaufsliste wird genannt
+  if (isNew && !hasList) return null;
+  if (rx(`^(?:zeig\\p{L}*|öffne\\p{L}*)\\s+(?:mir\\s+)?(?:die\\s+|den\\s+)?${LISTW}$|^${LISTW}(?:\\s+(?:anzeigen|zeigen|göster|aç))?$|was\\s+(?:muss|soll)\\s+ich\\s+(?:noch\\s+)?(?:ein)?kaufen|${LISTW}\\s+(?:göster|aç)|ne\\s+(?:almam|alayım|almamız)\\s+(?:lazım|gerek)`).test(s)) return { type: "einkauf", action: "show", items: [] };
+  if (rx(`(?:einkauf|einkaufen)\\s+(?:ist\\s+)?(?:abschließen|abgeschlossen|fertig|beendet|beenden|erledigt)|alışveriş\\p{L}*\\s+(?:bitir\\p{L}*|bitti|tamam\\p{L}*)`).test(s)) {
+    const m = raw.match(/(\d+(?:[.,]\d{1,2})?)\s*(?:€|euro|eur|avro)?/i);
+    return { type: "einkauf", action: "finish", items: [], amount: m ? Number(m[1].replace(",", ".")) : null };
+  }
+  // Streichen
+  let m = raw.match(new RegExp(`^(?:streich\\p{L}*|lösch\\p{L}*|entfern\\p{L}*|nimm)\\s+(.+?)\\s+(?:von|aus)\\s+(?:der\\s+|dem\\s+)?${LISTW}(?:\\s+(?:runter|raus))?$`, "iu"))
+    ?? raw.match(new RegExp(`^${LISTW}\\p{L}*\\s+(.+?)\\s+(?:sil|çıkar)\\p{L}*$`, "iu"))
+    ?? raw.match(new RegExp(`^(.+?)\\s+(?:von|aus)\\s+(?:der\\s+)?${LISTW}\\s+(?:streichen|löschen|entfernen|nehmen)$`, "iu"));
+  if (m) return { type: "einkauf", action: "remove", items: parseItems(m[1]) };
+  // Hinzufügen mit Listenwort
+  m = raw.match(new RegExp(`^(?:füg\\p{L}*|setz\\p{L}*|pack\\p{L}*|schreib\\p{L}*|tu\\p{L}*)?\\s*(.+?)\\s+(?:zur|zum|auf\\s+die|auf\\s+den|auf|in\\s+die)\\s+${LISTW}(?:\\s+(?:hinzu|dazu|drauf|rauf|rein|setzen|schreiben))?$`, "iu"))
+    ?? raw.match(new RegExp(`^${LISTW}\\s*:?\\s+(.+?)(?:\\s+(?:ekle|yaz)\\p{L}*)?$`, "iu"))
+    ?? raw.match(new RegExp(`^(.+?)\\s+${LISTW}\\s+(?:ekle|yaz)\\p{L}*$`, "iu"));
+  if (m) return { type: "einkauf", action: "add", items: parseItems(cleanShop(m[1])) };
+  if (hasList) return null;
+  // Abhaken, nur wenn der Artikel auf der Liste steht
+  m = raw.match(/^(.+?)\s+(?:gekauft|ist im wagen|im wagen|hab ich|habe ich|aldım|aldık|sepette)$/iu);
+  if (m && open.length) {
+    const items = parseItems(m[1]);
+    const on = new Set(open.map(normName));
+    if (items.some((x) => [...on].some((o) => normName(x.name).includes(o) || o.includes(normName(x.name))))) return { type: "einkauf", action: "check", items };
+  }
+  if (DATEW.test(s)) return null;
+  // Ohne Listenwort: "wir brauchen Milch", "Milch ist alle", "Milch kaufen", "süt lazım", "ekmek bitti", "süt al"
+  m = raw.match(/^(?:wir|ich)\s+(?:brauchen|brauche|müssen|muss)\s+(?:noch\s+)?(.+?)(?:\s+(?:kaufen|holen|einkaufen))?$/iu)
+    ?? raw.match(/^(?:kauf|kaufe|hol|hole)\s+(?:noch\s+)?(.+)$/iu)
+    ?? raw.match(/^(.+?)\s+(?:ist|sind)\s+(?:alle|leer|aus|aufgebraucht)$/iu)
+    ?? raw.match(/^(.+?)\s+(?:kaufen|einkaufen|holen)$/iu)
+    ?? raw.match(/^(.+?)\s+(?:lazım|gerek|bitti|kalmadı|almam lazım|almamız lazım|almam gerek|al|alınacak)$/iu);
+  if (m) {
+    const items = parseItems(cleanShop(m[1]));
+    if (items.length && items.every((x) => x.name.length > 1)) return { type: "einkauf", action: "add", items };
+  }
+  return null;
 }
 
 const PLAN_TR = [[/göğüs|pazı|biceps|brust/i, /brust/i], [/bacak|omuz|bein|schulter/i, /beine/i], [/sırt|triseps|rücken/i, /rücken/i], [/karın|core|stabil/i, /core/i]];

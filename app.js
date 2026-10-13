@@ -3,12 +3,13 @@ import { parseTr } from "./parser-tr.js";
 import { parseIntent, extractPrio, extractRepeat } from "./intents.js";
 import { t, LANG, LOCALE, setLang, translateStatic } from "./i18n.js";
 import { createTraining } from "./training.js";
+import { createShopping, STORES } from "./einkauf.js";
 
 const SUPABASE_URL = "https://hpxdhtuabzqwyslzcmbt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kKiQdntJd893YvBPFx7fhw_FYzlwwtz";
 const DEMO = new URLSearchParams(location.search).has("demo");
 // Bei jeder Veröffentlichung zusammen mit version.json und dem Cache-Namen in sw.js hochzählen
-const APP_VERSION = "22";
+const APP_VERSION = "23";
 const db = DEMO
   ? (await import("./mock.js")).db
   : (await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm")).createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -138,6 +139,8 @@ async function advanceSeries(force = false) {
 }
 
 async function refresh() {
+  // Einkaufsliste einmal im Hintergrund laden (für den Hinweis am Einkaufstag und die Sprachbefehle)
+  if (!state.shopLoading) state.shopLoading = shopping.load().then(() => { if (state.view === "heute" && state.entries) renderDay(); });
   const day = isoDate(state.day);
   const today = isoDate(new Date());
   await advanceSeries();
@@ -253,6 +256,13 @@ function renderDay() {
   html += dayStrip();
   const run = training.active();
   if (run) html += `<div class="hint">${t("Training läuft: {x}", { x: esc(run.name ?? "") })} <button data-open-training>${t("Weiter")}</button></div>`;
+  // Einkaufstag (Routine/Termin mit "Einkauf") oder Einkauf ist heute geplant: offene Artikel zeigen
+  const shopOpen = shopping.openCount();
+  const shopDay = state.entries.some((e) => !e.done && /einkauf|alışveriş|market/i.test(e.title));
+  if (shopOpen?.length && shopDay) {
+    const byStore = Object.entries(shopOpen.reduce((a, x) => ((a[x.store] = (a[x.store] ?? 0) + 1), a), {}));
+    html += `<div class="hint">${t("Einkaufsliste: {n} offen", { n: shopOpen.length })}${byStore.length > 1 ? " (" + byStore.map(([k, n]) => `${t(STORES[k] ?? k)} ${n}`).join(", ") + ")" : ""} <button data-open-shop>${t("Öffnen")}</button></div>`;
+  }
   const low = lowSupplies();
   if (isToday && low.length) html += `<div class="hint warn">${t("Vorrat")}: ${low.map((x) => `${esc(x.name)} ${supplyDays(x) <= 0 ? t("leer") : t("noch {n} Tage", { n: supplyDays(x) })}`).join(", ")} <button data-goto="mehr">${t("Ansehen")}</button></div>`;
   if (state.settings && state.settings.lat == null) html += `<div class="hint">${t("Für automatische Gebetszeiten einmal den Standort setzen.")} <button data-goto="mehr">${t("Jetzt einrichten")}</button></div>`;
@@ -290,12 +300,19 @@ function renderPlan() {
   const tabs = `<div class="seg plan-tabs" id="plan-tab">
       <button type="button" data-pt="routinen" class="${planTab === "routinen" ? "on" : ""}">${t("Routinen")}</button>
       <button type="button" data-pt="training" class="${planTab === "training" ? "on" : ""}">${t("Training")}</button>
+      <button type="button" data-pt="einkauf" class="${planTab === "einkauf" ? "on" : ""}">${t("Einkauf")}</button>
     </div>`;
   const bindTabs = () => $("#view-plan").querySelectorAll("#plan-tab button").forEach((b) => (b.onclick = () => { setPlanTab(b.dataset.pt); renderPlan(); window.scrollTo(0, 0); }));
   if (planTab === "training") {
     $("#view-plan").innerHTML = tabs + `<div id="training-host"></div>`;
     bindTabs();
     training.render($("#training-host"));
+    return;
+  }
+  if (planTab === "einkauf") {
+    $("#view-plan").innerHTML = tabs + `<div id="shop-host"></div>`;
+    bindTabs();
+    shopping.render($("#shop-host"));
     return;
   }
   const byTime = planGroup === "zeit";
@@ -686,6 +703,7 @@ function openTraining(startIt = false) {
   if (startIt) training.start();
 }
 document.addEventListener("click", (ev) => { if (ev.target.closest("[data-open-training]")) openTraining(); });
+document.addEventListener("click", (ev) => { if (ev.target.closest("[data-open-shop]")) { setPlanTab("einkauf"); switchView("plan"); } });
 
 document.addEventListener("click", async (ev) => {
   const t = ev.target.closest("[data-toggle],[data-edit-item],[data-edit-routine],[data-day],[data-open-day],[data-goto],[data-detail],#new-routine,#new-item");
@@ -1058,6 +1076,13 @@ const training = createTraining({
   },
 });
 
+// ---------- Einkauf ----------
+const shopping = createShopping({
+  db, t, esc, $, toast, openSheet, closeSheet, sheet, form, LOCALE,
+  lowSupplies: () => lowSupplies(), supplyDays: (x) => supplyDays(x),
+  onChange: () => { if (state.view === "heute") renderDay(); },
+});
+
 // ---------- Sprache ----------
 const voice = $("#voice");
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1143,7 +1168,7 @@ function targets() {
   return out;
 }
 const intentOf = (text) => parseIntent(text, new Date(), targets(), LANG, state.supplies ?? [],
-  { exercises: training.exercises(), workouts: training.workouts(), running: !!training.active() });
+  { exercises: training.exercises(), workouts: training.workouts(), running: !!training.active(), shop: shopping.names() });
 
 // Text ohne "jeden Monat" usw. parsen, die Wiederholung hängt sich an Termin oder Aufgabe
 function parseFull(text) {
@@ -1161,6 +1186,12 @@ function describe(cmd) {
   if (cmd.type === "gruppe") return [t("Routinen"), t(cmd.g === "zeit" ? "Nach Tageszeit" : "Nach Bereich")];
   if (cmd.type === "zeige") return [t("Anzeigen"), cmd.date ? fmtDay(cmd.date, { weekday: "long", day: "numeric", month: "long" }) : t({ heute: "Tag", termine: "Termine", plan: "Routinen", mehr: "Einstellungen", monat: "Monat", verlauf: "Verlauf", vorrat: "Supplement-Vorrat" }[cmd.view])];
   if (cmd.type === "suche") return [t("Suche"), cmd.q];
+  if (cmd.type === "einkauf") {
+    const names = (cmd.items ?? []).map((x) => x.name + (x.qty ? ` (${x.qty})` : "")).join(", ");
+    if (cmd.action === "show") return [t("Anzeigen"), t("Einkaufsliste")];
+    if (cmd.action === "finish") return [t("Einkauf abschließen"), cmd.amount != null ? cmd.amount.toLocaleString(LOCALE(), { style: "currency", currency: "EUR" }) : t("ohne Betrag")];
+    return [t({ add: "Auf die Einkaufsliste", check: "Im Wagen", remove: "Von der Liste streichen" }[cmd.action]), names];
+  }
   if (cmd.type === "training") {
     if (cmd.action === "start") return [t("Training"), t("Starten") + (cmd.workout ? ": " + cmd.workout.name : "")];
     if (cmd.action === "stop") return [t("Training"), t("Beenden")];
@@ -1289,6 +1320,13 @@ async function runIntent(c) {
       if (state.view !== "plan") switchView("plan");
       const msg = await training.runVoice(c);
       if (msg) toast(msg);
+      return;
+    }
+    case "einkauf": {
+      setPlanTab("einkauf");
+      if (state.view !== "plan") switchView("plan"); else renderPlan();
+      const r = await shopping.runVoice(c);
+      if (r?.msg) toast(r.msg, r.undo ? async () => { await r.undo(); renderPlan(); } : null);
       return;
     }
     case "suche":
@@ -1466,6 +1504,7 @@ const HELP = {
     ["Ändern", ["Verschiebe Zahnarzt auf Freitag um 10", "Mach Steuer wichtig", "Pausiere Retinol", "Erinnere mich 30 Minuten vorher an Zahnarzt", "Füge Milch zur Einkaufsliste hinzu", "Lösche den Termin Zahnarzt"]],
     ["Anzeigen", ["Was steht morgen an", "Zeig mir die Termine", "Zeig den Monat", "Was habe ich erledigt", "Suche Zahnarzt", "Teile die Routinen nach Tageszeit auf", "Öffne die Einstellungen"]],
     ["Training", ["Starte Training", "Starte Brusttraining", "Starte Beintag", "Hammer Curls 14 kg 12 Wiederholungen", "Latziehen breit 50 kg 12 Wiederholungen", "3x12 mit 30 kg Seil nach unten", "40 kg 10 mal", "Seitstütz 45 Sekunden", "Laufband 10 Minuten Steigung 10", "Latziehen 50 kg 10 Wiederholungen 2 übrig", "Gewicht 99,5", "Bauchumfang 104", "Face Pulls entfernen", "Face Pulls als Nächstes", "Hyperextensions ans Ende", "Zeig die Analyse", "Training beenden", "Training fortsetzen"]],
+    ["Einkauf", ["Milch, 6 Eier und 500 g Hack auf die Einkaufsliste", "Wir brauchen Brot", "Milch gekauft", "Streich Skyr von der Einkaufsliste", "Was muss ich einkaufen", "Einkauf abschließen 45 Euro"]],
     ["Vorrat", ["Magnesium aufgefüllt 60", "Noch 40 Ashwagandha", "Wie lange reicht Magnesium", "Zeig den Vorrat"]],
     ["Einstellungen", ["Sprich Türkisch", "Dunkler Modus", "Heller Modus"]],
   ],
@@ -1475,6 +1514,7 @@ const HELP = {
     ["Değiştir", ["Diş doktorunu cumaya ertele", "Vergi önemli", "Retinol'ü durdur", "Diş doktoru için 1 saat önce hatırlat", "Alışveriş listesine süt ekle", "Diş doktoru randevusunu sil"]],
     ["Göster", ["Yarın neler var", "Randevuları göster", "Aylık görünüm", "Geçmişi göster", "Diş doktoru bul", "Rutinleri vakte göre sırala", "Ayarları aç"]],
     ["Antrenman", ["Antrenmana başla", "Göğüs antrenmanını başlat", "Bacak omuz antrenmanını başlat", "Çekiç curl 14 kilo 12 tekrar", "Lat çekme geniş 50 kilo 12 tekrar", "Triseps halat aşağı 3 set 12 tekrar 30 kilo", "Koşu bandı 10 dakika eğim 10", "Lat çekme 50 kilo 10 tekrar 2 yedek", "Kilom 99,5", "Bel çevresi 104", "Face Pull çıkar", "Face Pull'u öne al", "Hiperekstansiyonu sona al", "Antrenman analizi", "Antrenmanı bitir", "Antrenmana devam et"]],
+    ["Alışveriş", ["Alışveriş listesine süt ve yumurta ekle", "Ekmek lazım", "Süt aldım", "Alışveriş listesinden sütü sil", "Alışveriş listesini göster", "Alışverişi bitir 45 euro"]],
     ["Stok", ["Magnezyum doldurdum 60", "40 tane ashwagandha kaldı", "Magnezyum ne kadar yeter", "Stoku göster"]],
     ["Ayarlar", ["Almancaya geç", "Koyu mod", "Açık mod"]],
   ],

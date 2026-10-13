@@ -515,3 +515,28 @@ button.set-no { border: 0; font: inherit; font-weight: 800; color: #fff; }
 .resume-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .resume-card > span { display: flex; flex-direction: column; gap: 2px; }
 .resume-card .btn { flex: none; width: auto; min-width: 0; padding: 10px 18px; margin: 0; }
+
+/* Einkaufsliste */
+.shop-add { display: flex; gap: 8px; margin: 14px 0 4px; }
+.shop-add input { flex: 1; min-width: 0; margin: 0; }
+.shop-add .primary { flex: none; width: 52px; min-height: 48px; padding: 0; margin: 0; font-size: 24px; line-height: 1; }
+.shop-stores { padding-top: 10px; }
+.shop-sug.wrap, .shop-sug { flex-wrap: wrap; overflow-x: visible; padding-top: 4px; }
+.shop-sug .chip small { font-weight: 600; opacity: .75; margin-left: 4px; }
+.shop-cat { margin-top: 18px; }
+.shop-card { padding: 4px 12px; }
+.shop-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+.shop-row + .shop-row { border-top: 1px solid var(--line); }
+.shop-row .body { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 4px 0; color: var(--text); }
+.shop-row .title { font-weight: 700; display: block; overflow-wrap: anywhere; }
+.shop-row .title em { font-style: normal; font-weight: 600; color: var(--muted); margin-left: 4px; }
+.shop-row .sub { display: block; font-size: 13px; color: var(--muted); margin-top: 3px; line-height: 1.6; }
+.shop-row .sub b { margin-right: 6px; }
+.shop-row .sub b { color: var(--petrol); font-weight: 700; }
+.shop-row.done .title { text-decoration: line-through; color: var(--done-text); }
+.shop-row.done .check.on { background: var(--done); border-color: var(--done); }
+.shop-flag { display: inline; -webkit-box-decoration-break: clone; box-decoration-break: clone; font-size: 12px; font-weight: 700; border-radius: 8px; padding: 2px 8px; background: #FFF4DE; color: #8A5A00; }
+.shop-flag.haram { background: #FDECEC; color: #B3261E; }
+:root[data-theme="dark"] .shop-flag { background: #3A2E17; color: #F2C46D; }
+:root[data-theme="dark"] .shop-flag.haram { background: #3A1C1C; color: #F28B82; }
+.shop-stats { text-align: center; margin: 18px 0 6px; }
