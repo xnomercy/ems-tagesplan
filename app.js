@@ -11,12 +11,13 @@ import { createGlaube, ramadanActive, ramadanShift } from "./glaube.js";
 import { createWellness, sleepOffset } from "./wellness.js";
 import { createDeadlines } from "./fristen.js";
 import { createReview } from "./rueckblick.js";
+import { createImport } from "./dokument.js";
 
 const SUPABASE_URL = "https://hpxdhtuabzqwyslzcmbt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kKiQdntJd893YvBPFx7fhw_FYzlwwtz";
 const DEMO = new URLSearchParams(location.search).has("demo");
 // Bei jeder Veröffentlichung zusammen mit version.json und dem Cache-Namen in sw.js hochzählen
-const APP_VERSION = "27";
+const APP_VERSION = "28";
 const rawDb = DEMO
   ? (await import("./mock.js")).db
   : (await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm")).createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -966,7 +967,8 @@ function openItemSheet(item = {}, preset = {}) {
       <button type="button" data-k="aufgabe" class="${it.kind === "aufgabe" ? "on" : ""}">${t("Aufgabe")}</button>
       <button type="button" data-k="termin" class="${it.kind === "termin" ? "on" : ""}">${t("Termin")}</button>
       <button type="button" data-k="routine">${t("Routine")}</button>
-    </div>`}
+    </div>
+    <button type="button" class="ghost imp-link" id="from-doc"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span>${t("Aus Foto oder PDF übernehmen")}</span></button>`}
     <input name="title" placeholder="${t("Was?")}" required value="${esc(it.title)}">
     <label id="date-label">${t(it.kind === "aufgabe" ? "Fällig am" : "Datum")}</label><input name="on_date" type="date" required value="${it.on_date}">
     <div class="row"><div><label>${t("Von")}</label><input name="start_time" type="time" value="${hhmm(it.start_time)}"></div>
@@ -1004,6 +1006,8 @@ function openItemSheet(item = {}, preset = {}) {
   const getChecklist = () => [...form.querySelectorAll(".cl-row")]
     .map((r) => ({ t: r.querySelector(".cl-text").value.trim(), d: r.querySelector("input[type=checkbox]").checked }))
     .filter((c) => c.t);
+  const fromDoc = form.querySelector("#from-doc");
+  if (fromDoc) fromDoc.onclick = () => importer.open();
   form.querySelectorAll("#kind-seg button").forEach((b) => (b.onclick = () => {
     if (b.dataset.k === "routine") { sheet.close(); openRoutineSheet({ title: form.title.value }); return; }
     kind = b.dataset.k;
@@ -1196,7 +1200,8 @@ const daylog = createDayLog(db);
 const common = { db, t, esc, $, toast, openSheet, closeSheet, sheet, form, fmtDay, LOCALE, enhancePickers: (f) => enhancePickers(f), today: () => isoDate(new Date()), onChange: () => render() };
 const glaube = createGlaube({ ...common, daylog, settings: () => state.settings, saveSettings, getPt: () => state.pt });
 const wellness = createWellness({ ...common, daylog, settings: () => state.settings, getPt: () => state.pt });
-const deadlines = createDeadlines({ ...common, onChange: () => { state.upcoming = null; refresh(); } });
+const deadlines = createDeadlines({ ...common, onChange: () => { state.upcoming = null; refresh(); }, onImport: () => importer.open() });
+const importer = createImport({ ...common, deadlines, lang: () => LANG, openItemSheet: (a, b) => openItemSheet(a, b), onChange: () => { state.upcoming = null; refresh(); } });
 const review = createReview({ ...common, daylog, routines: () => state.routines, settings: () => state.settings, budget: () => null });
 const scanner = createScanner({ ...common, DEMO, onAdd: async (name, res) => {
   const r = await shopping.add([{ name, note: res.verdict === "pruefen" ? t("Zutaten prüfen") : null }]);
@@ -1270,25 +1275,25 @@ let rec = null, silenceTimer = null;
 // Drei Beispiele passend zur Seite
 const EXAMPLES = {
   heute: ["Termin morgen um 15 Uhr Zahnarzt", "Asr erledigt", "Ein Glas Wasser", "Koran 5 Seiten gelesen"],
-  termine: ["Termin am 20.10. um 14 Uhr Zahnarzt", "Aufgabe Steuer bis Freitag, wichtig", "Verschiebe Zahnarzt auf Freitag um 10"],
+  termine: ["Termin am 20.10. um 14 Uhr Zahnarzt", "Aufgabe Steuer bis Freitag, wichtig", "Brief scannen"],
   plan: ["Täglich um 21 Uhr Buch lesen", "Pausiere Retinol", "Teile die Routinen nach Tageszeit auf"],
   training: ["Starte Training", "Latziehen 50 kg 12 Wiederholungen", "Gewicht 99,5"],
   einkauf: ["Milch, 6 Eier und 500 g Hack auf die Einkaufsliste", "Milch gekauft", "Scanne Barcode"],
   vorrat: ["Magnesium aufgefüllt 60", "Wie lange reicht Magnesium", "Noch 40 Ashwagandha"],
   glaube: ["Koran 5 Seiten gelesen", "Koran-Ziel bis 30. März", "Heute gefastet"],
-  fristen: ["TÜV am 12.3.2027", "Handyvertrag endet am 1.8.2027 Kündigungsfrist 3 Monate", "Personalausweis läuft am 5.6.2029 ab"],
+  fristen: ["TÜV am 12.3.2027", "Handyvertrag endet am 1.8.2027 Kündigungsfrist 3 Monate", "Brief scannen"],
   rueckblick: ["Zeig den Wochenrückblick", "Wann soll ich schlafen", "2 Gläser Wasser"],
   mehr: ["Sprich Türkisch", "Dunkler Modus", "Schlafziel 8 Stunden"],
 };
 const EXAMPLES_TR = {
   heute: ["Yarın saat 15'te diş doktoru randevusu", "İkindiyi kıldım", "Bir bardak su içtim", "Kuran 5 sayfa okudum"],
-  termine: ["Yarın saat 15'te diş doktoru randevusu", "Vergi görevi cumaya kadar, önemli", "Diş doktorunu cumaya ertele"],
+  termine: ["Yarın saat 15'te diş doktoru randevusu", "Vergi görevi cumaya kadar, önemli", "Belge oku"],
   plan: ["Her gün saat 21'de kitap oku", "Retinol'ü durdur", "Rutinleri vakte göre sırala"],
   training: ["Antrenmana başla", "Lat çekme 50 kilo 12 tekrar", "Kilom 99,5"],
   einkauf: ["Alışveriş listesine süt ve yumurta ekle", "Süt aldım", "Barkod tara"],
   vorrat: ["Magnezyum doldurdum 60", "Magnezyum ne kadar yeter", "40 tane ashwagandha kaldı"],
   glaube: ["Kuran 5 sayfa okudum", "Kuran hatmi 30 mart'a kadar", "Oruç tuttum"],
-  fristen: ["Muayene 12.3.2027", "Telefon sözleşmesi 1.8.2027 fesih süresi 3 ay", "Kimlik 5.6.2029'da bitiyor"],
+  fristen: ["Muayene 12.3.2027", "Telefon sözleşmesi 1.8.2027 fesih süresi 3 ay", "Belge oku"],
   rueckblick: ["Haftalık özeti göster", "Ne zaman yatmalıyım", "2 bardak su"],
   mehr: ["Almancaya geç", "Koyu mod", "Uyku hedefi 8 saat"],
 };
@@ -1400,6 +1405,7 @@ function describe(cmd) {
   if (cmd.type === "suche") return [t("Suche"), cmd.q];
   if (cmd.type === "wasser") return [t("Wasser"), cmd.action === "status" ? t("Stand anzeigen") : t("+{n} Gläser ({l} l)", { n: cmd.n, l: wellness.liters(cmd.n) })];
   if (cmd.type === "scan") return [t("Packung scannen"), t("Halal-Prüfung")];
+  if (cmd.type === "import") return [t("Dokument"), t("Termine aus Foto, PDF oder Text übernehmen")];
   if (cmd.type === "schlaf") return [t("Schlaf"), cmd.action === "set" ? t("Ziel {n} Std.", { n: cmd.hours }) : t("Schlafenszeit anzeigen")];
   if (cmd.type === "frist") return [t("Frist"), `${cmd.title} · ${fmtDay(cmd.due, { day: "numeric", month: "short", year: "numeric" })}${cmd.notice ? " · " + t("{n} Monate Kündigungsfrist", { n: cmd.notice }) : ""}`];
   if (cmd.type === "glaube") {
@@ -1573,6 +1579,8 @@ async function runIntent(c) {
     case "scan":
       if (state.view !== "einkauf") switchView("einkauf");
       return scanner.open();
+    case "import":
+      return importer.open();
     case "frist": {
       if (state.view !== "fristen") switchView("fristen");
       const r = await deadlines.runVoice(c);
@@ -1760,7 +1768,7 @@ const HELP = {
     ["Wasser und Schlaf", ["Ein Glas Wasser", "2 Gläser Wasser getrunken", "Halber Liter Wasser", "Wie viel Wasser habe ich getrunken", "Wann soll ich schlafen", "Schlafziel 8 Stunden"]],
     ["Koran und Ramadan", ["Koran 5 Seiten gelesen", "Ein Juz gelesen", "Ich bin bei Seite 245 im Koran", "Koran-Ziel bis 30. März", "Heute gefastet", "Nicht gefastet", "Fasten nachgeholt", "Ramadan-Modus an", "Zeig Koran"]],
     ["Fristen", ["TÜV am 12.3.2027", "Handyvertrag endet am 1.8.2027 Kündigungsfrist 3 Monate", "Personalausweis läuft am 5.6.2029 ab", "Kfz-Versicherung 1.1.2027", "Öffne Fristen"]],
-    ["Scanner und Rückblick", ["Scanne Barcode", "Ist das halal", "Zeig den Wochenrückblick"]],
+    ["Scanner und Rückblick", ["Scanne Barcode", "Ist das halal", "Brief scannen", "Termin aus PDF übernehmen", "Zeig den Wochenrückblick"]],
     ["Einstellungen", ["Sprich Türkisch", "Dunkler Modus", "Heller Modus"]],
   ],
   tr: [
@@ -1774,7 +1782,7 @@ const HELP = {
     ["Su ve uyku", ["Bir bardak su içtim", "2 bardak su", "Yarım litre su", "Ne kadar su içtim", "Ne zaman yatmalıyım", "Uyku hedefi 8 saat"]],
     ["Kuran ve Ramazan", ["Kuran 5 sayfa okudum", "Bir cüz okudum", "Kuran 245. sayfadayım", "Kuran hatmi 30 mart'a kadar", "Oruç tuttum", "Oruç tutmadım", "Kaza orucu tuttum", "Ramazan modunu aç", "Kuran'ı göster"]],
     ["Süreler", ["Muayene 12.3.2027", "Telefon sözleşmesi 1.8.2027 fesih süresi 3 ay", "Kimlik 5.6.2029'da bitiyor", "Süreleri göster"]],
-    ["Tarayıcı ve özet", ["Barkod tara", "Helal mi", "Haftalık özeti göster"]],
+    ["Tarayıcı ve özet", ["Barkod tara", "Helal mi", "Belge oku", "Mektubu tara", "Haftalık özeti göster"]],
     ["Ayarlar", ["Almancaya geç", "Koyu mod", "Açık mod"]],
   ],
 };

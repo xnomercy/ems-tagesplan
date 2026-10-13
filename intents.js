@@ -447,6 +447,9 @@ const NUM = (w) => (w == null ? 1 : /\d/.test(w) ? Number(w.replace(",", ".")) :
 const NUMW = `(\\d+(?:[.,]\\d+)?|${Object.keys(ZAHL).join("|")})`;
 function extraIntent(s, now, lang) {
   let m;
+  // Dokument: "Brief scannen", "Termin aus PDF übernehmen", "belge oku", "mektubu tara"
+  if (rx(`brief${W}|dokument${W}|pdf|foto${W}|bild${W}|schreiben|belge${W}|mektub?${W}|evrak${W}|fotoğraf${W}|resim${W}`).test(s)
+    && rx(`scann${W}|einles${W}|lies${W}|lesen|import${W}|auswert${W}|übernehm${W}|übernimm|tara${W}|oku${W}|yükle${W}|aktar${W}`).test(s)) return { type: "import" };
   // Barcode: "scanne Barcode", "ist das halal", "barkod tara"
   if (rx(`barcode${W}|strichcode${W}|scann${W}|barkod${W}|tara(?:t|yın)?`).test(s) || rx(`ist (?:das|es) halal|helal mi`).test(s)) return { type: "scan" };
 

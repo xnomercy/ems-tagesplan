@@ -31,6 +31,8 @@ const KIND_RE = [
 const MONTHS_DE = ["januar", "februar", "märz", "april", "mai", "juni", "juli", "august", "september", "oktober", "november", "dezember"];
 const MONTHS_TR = ["ocak", "şubat", "mart", "nisan", "mayıs", "haziran", "temmuz", "ağustos", "eylül", "ekim", "kasım", "aralık"];
 
+export const deadlineKind = (s) => KIND_RE.find(([, re]) => re.test(s))?.[0] ?? null;
+
 export function parseDeadline(text, now, parseDate) {
   const s = text.replace(/\s+/g, " ").trim();
   if (/(?<!\p{L})(?:termin|randevu\p{L}*|uhr|saat)(?!\p{L})|um \d/iu.test(s)) return null;
@@ -134,8 +136,11 @@ export function createDeadlines(ctx) {
     host.innerHTML = `<div class="section-head"><h3>${t("Fristen und Verträge")}</h3><span class="muted">${open.length}</span></div>
       ${open.length ? `<div class="card dl-card">${open.map(row).join("")}</div>` : `<div class="empty">${t("Noch keine Fristen. Trag TÜV, Versicherungen, Verträge oder Ausweise ein. Die App erinnert rechtzeitig.")}</div>`}
       <button class="primary" id="dl-add">${t("Frist hinzufügen")}</button>
+      ${ctx.onImport ? `<button type="button" class="ghost" id="dl-import">${t("Aus Brief oder PDF übernehmen")}</button>` : ""}
       ${open.length ? "" : `<div class="chips shop-sug wrap" style="margin-top:12px">${["tuev", "versicherung", "vertrag", "ausweis", "pass"].map((k) => `<button type="button" class="chip" data-dl-kind="${k}">+ ${t(KINDS[k].label)}</button>`).join("")}</div>`}`;
     host.querySelector("#dl-add").onclick = () => openEdit();
+    const imp = host.querySelector("#dl-import");
+    if (imp) imp.onclick = () => ctx.onImport();
     host.querySelectorAll("[data-dl]").forEach((b) => (b.onclick = () => openEdit(list.find((d) => d.id === b.dataset.dl))));
     host.querySelectorAll("[data-dl-kind]").forEach((b) => (b.onclick = () => openEdit({ kind: b.dataset.dlKind })));
   }

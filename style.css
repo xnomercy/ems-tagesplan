@@ -688,3 +688,20 @@ body.nav-open .sidenav-list button:nth-child(6) { transition-delay: .15s; } body
 .rv-tips li { margin: 6px 0; }
 .steps { padding-left: 22px; margin: 8px 0 4px; }
 .steps li { margin: 8px 0; }
+
+/* v28: Import aus Foto, PDF, Kalender */
+.imp-btn { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; }
+button.btn.imp-btn { min-height: 52px; margin-top: 8px; border-radius: 14px; border: 1.5px solid var(--line); background: var(--card); color: var(--text); font-weight: 700; font-size: 16px; }
+.imp-link { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin: 2px 0 6px; }
+.imp-prog { margin-top: 14px; }
+.imp-prog .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 6px; }
+.imp-prog .bar div { height: 100%; background: var(--teal, #51B8C4); transition: width .3s; }
+.imp-row { padding: 12px; margin-top: 10px; transition: opacity .2s; }
+.imp-row.off { opacity: .55; }
+.imp-check { text-transform: none; letter-spacing: normal; font-weight: 400; display: flex; gap: 10px; align-items: flex-start; font-size: 14px; color: var(--muted); margin: 0 0 6px; }
+.imp-check input { width: 22px; height: 22px; flex: none; margin: 0; accent-color: var(--petrol); }
+.imp-check span { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.imp-row .row { margin-top: 0; }
+.imp-raw { margin-top: 12px; }
+.imp-raw summary { color: var(--muted); font-size: 14px; padding: 8px 0; }
+.imp-raw pre { white-space: pre-wrap; font: 13px/1.4 ui-monospace, monospace; background: var(--card); padding: 10px; border-radius: 10px; max-height: 240px; overflow: auto; }
