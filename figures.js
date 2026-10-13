@@ -11,6 +11,9 @@ const latLegs = [[FR, [36, 74], [84, 74]], [FR, [40, 62], [80, 62]], [FIG, "neck
   [FIG, "ls", "rs"], [FIG, "ls", "le"], [FIG, "le", "lh"], [FIG, "rs", "re"], [FIG, "re", "rh"]];
 const latBase = { head: [60, 28], neck: [60, 37], hip: [60, 70], lk: [49, 70], rk: [71, 70], lf: [49, 94], rf: [71, 94], ls: [51, 40], rs: [69, 40] };
 
+// Front stehend: Seitheben
+const standBase = { head: [60, 16], neck: [60, 25], ls: [51, 28], rs: [69, 28], hip: [60, 58], lk: [55, 76], rk: [65, 76], lf: [53, 96], rf: [67, 96] };
+
 export const PATTERNS = {
   lat_wide: {
     label: "Latziehen breit",
@@ -161,6 +164,81 @@ export const PATTERNS = {
       [FIG, "hip", "neck"], [FIG, "hip", "k1"], [FIG, "k1", "f1"], [FIG, "hip", "k2"], [FIG, "k2", "f2"], [FIG, "neck", "e1"], [FIG, "e1", "h1"], [FIG, "neck", "e2"], [FIG, "e2", "h2"]],
     a: { head: [62, 20], neck: [58, 28], hip: [54, 56], k1: [62, 70], f1: [70, 86], k2: [48, 72], f2: [38, 90], e1: [62, 44], h1: [70, 52], e2: [52, 44], h2: [46, 54] },
     b: { head: [62, 20], neck: [58, 28], hip: [54, 56], k1: [48, 72], f1: [38, 90], k2: [62, 70], f2: [70, 86], e1: [52, 44], h1: [46, 54], e2: [62, 44], h2: [70, 52] },
+  },
+  bench_incline: {
+    label: "Schrägbankdrücken",
+    parts: [[FR, [40, 80], [80, 40]], [FR, [18, 80], [44, 80]], [FR, [28, 80], [28, 96]], [FR, [62, 58], [62, 96]],
+      [FIG, "neck", "hip"], [FIG, "hip", "knee"], [FIG, "knee", "foot"], [FIG, "neck", "elbow"], [FIG, "elbow", "h"], [EQ, "b1", "b2"]],
+    a: { head: [82, 36], neck: [76, 46], hip: [44, 76], knee: [24, 70], foot: [20, 96], elbow: [64, 56], h: [74, 42], b1: [69, 42], b2: [79, 42] },
+    b: { head: [82, 36], neck: [76, 46], hip: [44, 76], knee: [24, 70], foot: [20, 96], elbow: [84, 30], h: [90, 14], b1: [85, 14], b2: [95, 14] },
+  },
+  fly: {
+    label: "Fliegende (Flys)",
+    // Rückenlage, Arme leicht gebeugt seitlich öffnen und über der Brust zusammenführen
+    parts: [[FR, [22, 70], [98, 70]], [FR, [30, 70], [30, 92]], [FR, [90, 70], [90, 92]],
+      [FIG, "neck", "hip"], [FIG, "hip", "knee"], [FIG, "knee", "foot"], [FIG, "neck", "elbow"], [FIG, "elbow", "h"], [EQ, "b1", "b2"]],
+    a: { head: [94, 60], neck: [84, 64], hip: [46, 64], knee: [30, 54], foot: [20, 94], elbow: [74, 76], h: [66, 84], b1: [61, 84], b2: [71, 84] },
+    b: { head: [94, 60], neck: [84, 64], hip: [46, 64], knee: [30, 54], foot: [20, 94], elbow: [78, 40], h: [82, 18], b1: [77, 18], b2: [87, 18] },
+  },
+  cable_press: {
+    label: "Kabel-Brustdrücken",
+    parts: [[FR, [8, 2], [8, 96]], [EQ, [8, 30], "h"],
+      [FIG, "foot", "knee"], [FIG, "knee", "hip"], [FIG, "hip", "f2"], [FIG, "hip", "neck"], [FIG, "neck", "elbow"], [FIG, "elbow", "h"]],
+    a: { foot: [44, 96], knee: [46, 78], f2: [72, 96], hip: [54, 60], neck: [62, 30], head: [66, 22], elbow: [50, 40], h: [64, 38] },
+    b: { foot: [44, 96], knee: [46, 78], f2: [72, 96], hip: [54, 60], neck: [62, 30], head: [66, 22], elbow: [80, 34], h: [98, 36] },
+  },
+  hammer_curl: {
+    label: "Hammer Curls",
+    parts: [[FIG, "neck", "hip"], [FIG, "hip", "knee"], [FIG, "knee", "foot"], [FIG, "neck", "elbow"], [FIG, "elbow", "h"], [EQ, "b1", "b2"]],
+    a: { head: [58, 18], neck: [56, 27], hip: [54, 60], knee: [56, 78], foot: [54, 96], elbow: [58, 48], h: [64, 68], b1: [64, 62], b2: [64, 74] },
+    b: { head: [58, 18], neck: [56, 27], hip: [54, 60], knee: [56, 78], foot: [54, 96], elbow: [58, 48], h: [68, 30], b1: [70, 24], b2: [66, 36] },
+  },
+  ez_curl: {
+    label: "SZ-Curls",
+    parts: [[FIG, "neck", "hip"], [FIG, "hip", "knee"], [FIG, "knee", "foot"], [FIG, "neck", "elbow"], [FIG, "elbow", "h"], [EQ, "b1", "b2"]],
+    a: { head: [58, 18], neck: [56, 27], hip: [54, 60], knee: [56, 78], foot: [54, 96], elbow: [58, 48], h: [64, 68], b1: [54, 68], b2: [80, 68] },
+    b: { head: [58, 18], neck: [56, 27], hip: [54, 60], knee: [56, 78], foot: [54, 96], elbow: [58, 48], h: [68, 30], b1: [58, 30], b2: [84, 30] },
+  },
+  shoulder_press: {
+    label: "Schulterdrücken",
+    parts: [...latLegs, [EQ, "l1", "lh"], [EQ, "rh", "r1"]],
+    a: { ...latBase, le: [38, 50], lh: [40, 34], re: [82, 50], rh: [80, 34], l1: [32, 34], r1: [88, 34] },
+    b: { ...latBase, le: [42, 22], lh: [46, 6], re: [78, 22], rh: [74, 6], l1: [38, 6], r1: [82, 6] },
+  },
+  lateral_raise: {
+    label: "Seitheben",
+    parts: [[FIG, "neck", "hip"], [FIG, "hip", "lk"], [FIG, "lk", "lf"], [FIG, "hip", "rk"], [FIG, "rk", "rf"],
+      [FIG, "ls", "rs"], [FIG, "ls", "le"], [FIG, "le", "lh"], [FIG, "rs", "re"], [FIG, "re", "rh"], [EQ, "lh", "lg"], [EQ, "rh", "rg"]],
+    a: { ...standBase, le: [47, 44], lh: [46, 58], re: [73, 44], rh: [74, 58], lg: [46, 64], rg: [74, 64] },
+    b: { ...standBase, le: [36, 30], lh: [22, 30], re: [84, 30], rh: [98, 30], lg: [22, 36], rg: [98, 36] },
+  },
+  leg_press: {
+    label: "Beinpresse",
+    parts: [[FR, [18, 50], [40, 84]], [FR, [40, 84], [58, 84]], [FR, [50, 84], [50, 96]], [FR, [58, 84], [108, 18]], [EQ, "p1", "p2"],
+      [FIG, "neck", "hip"], [FIG, "hip", "knee"], [FIG, "knee", "foot"], [FIG, "neck", "elbow"], [FIG, "elbow", "h"]],
+    a: { head: [22, 42], neck: [28, 52], hip: [44, 80], knee: [50, 50], foot: [72, 50], elbow: [36, 70], h: [46, 76], p1: [66, 46], p2: [78, 55] },
+    b: { head: [22, 42], neck: [28, 52], hip: [44, 80], knee: [64, 56], foot: [86, 34], elbow: [36, 70], h: [46, 76], p1: [80, 30], p2: [92, 39] },
+  },
+  leg_curl: {
+    label: "Beinbeuger (Maschine)",
+    parts: [[FR, [28, 70], [60, 70]], [FR, [28, 70], [24, 28]], [FR, [44, 70], [44, 96]], [EQ, "foot", "p"],
+      [FIG, "neck", "hip"], [FIG, "hip", "knee"], [FIG, "knee", "foot"], [FIG, "neck", "elbow"], [FIG, "elbow", "h"]],
+    a: { head: [34, 24], neck: [34, 33], hip: [36, 66], knee: [62, 66], foot: [88, 68], p: [88, 62], elbow: [42, 50], h: [52, 62] },
+    b: { head: [34, 24], neck: [34, 33], hip: [36, 66], knee: [62, 66], foot: [62, 92], p: [56, 92], elbow: [42, 50], h: [52, 62] },
+  },
+  leg_ext: {
+    label: "Beinstrecker (Maschine)",
+    parts: [[FR, [28, 70], [60, 70]], [FR, [28, 70], [24, 28]], [FR, [44, 70], [44, 96]], [EQ, "foot", "p"],
+      [FIG, "neck", "hip"], [FIG, "hip", "knee"], [FIG, "knee", "foot"], [FIG, "neck", "elbow"], [FIG, "elbow", "h"]],
+    a: { head: [34, 24], neck: [34, 33], hip: [36, 66], knee: [62, 66], foot: [62, 92], p: [68, 92], elbow: [42, 50], h: [52, 62] },
+    b: { head: [34, 24], neck: [34, 33], hip: [36, 66], knee: [62, 66], foot: [88, 64], p: [88, 70], elbow: [42, 50], h: [52, 62] },
+  },
+  calf_raise: {
+    label: "Wadenheben",
+    parts: [[FR, [38, 90], [66, 90]], [FR, [66, 90], [66, 96]], [FR, [74, 20], [74, 96]], [FIG, "foot", "toe"],
+      [FIG, "foot", "knee"], [FIG, "knee", "hip"], [FIG, "hip", "neck"], [FIG, "neck", "elbow"], [FIG, "elbow", "h"]],
+    a: { toe: [62, 89], foot: [48, 94], knee: [52, 74], hip: [52, 56], neck: [54, 26], head: [56, 18], elbow: [62, 42], h: [73, 48] },
+    b: { toe: [62, 89], foot: [52, 84], knee: [54, 64], hip: [54, 46], neck: [56, 16], head: [58, 8], elbow: [64, 32], h: [73, 38] },
   },
   generic: {
     label: "Sonstige Übung",

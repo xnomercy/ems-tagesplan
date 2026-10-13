@@ -38,6 +38,30 @@ const EXTRA4_KEY = "tagesplan-train-v4";
 // Ergänzung (4): Nacken-Curl liegend mit Drehung
 const EXTRA5 = [["Nacken-Curl liegend (mit Drehung)", "neck_curl", "reps", 2, 60, "Rückenlage, Kopf über dem Bankende. Kopf langsam hängen lassen, Kinn Richtung Brust heben, oben gerade halten und je 1× nach rechts und links drehen. Ohne Gewicht anfangen, langsam, kein Schwung. Bei Schwindel, Kribbeln oder Schmerz in den Arm: sofort aufhören."]];
 const EXTRA5_KEY = "tagesplan-train-v5";
+// Ergänzung (5): zwei neue Pläne nach Nutzerangabe. Kurzhantel-kg gelten pro Hand.
+// [Name, Bild, Art, Sätze, Pause s, Notiz, kg-Schritt, Wdh. von, Wdh. bis]
+const PLANS6 = [
+  ["Brust + Bizeps", [
+    ["Bankdrücken Kurzhanteln (flach)", "bench", "reps", 3, 150, "kg pro Hand. Vorher 1 bis 2 leichte Aufwärmsätze. Schulterblätter zusammen und nach unten, Füße fest am Boden. Hanteln bis auf Brusthöhe ablassen, Ellbogen etwa 45° vom Körper, nicht ganz zur Seite.", 2, 8, 12],
+    ["Schrägbankdrücken Kurzhanteln", "bench_incline", "reps", 3, 120, "kg pro Hand. Bank auf etwa 30°, steiler geht mehr auf die Schulter. Oben die Hanteln nicht zusammenschlagen.", 2, 8, 12],
+    ["Fliegende Kurzhanteln (Flys)", "fly", "reps", 3, 75, "kg pro Hand. Arme leicht gebeugt und fest lassen. Nur so weit öffnen, bis die Brust gedehnt ist, nicht tiefer. Lieber leichter, das schont die Schulter.", 2, 10, 15],
+    ["Kabel-Brustdrücken nach vorne (stehend)", "cable_press", "reps", 3, 75, "Ein Schritt nach vorne, Bauch fest, kein Hohlkreuz. Griffe auf Brusthöhe nach vorne zusammendrücken und vorne 1 s halten.", 2.5, 10, 15],
+    ["Bizeps-Curl Kurzhanteln", "curl", "reps", 3, 75, "kg pro Hand. Ellbogen bleiben am Körper, kein Schwung aus dem Rücken. 2 bis 3 s langsam ablassen.", 2, 10, 15],
+    ["Hammer Curls", "hammer_curl", "reps", 3, 75, "kg pro Hand. Daumen zeigen nach oben. Trifft zusätzlich den Unterarm und macht den Arm breiter.", 2, 10, 15],
+    ["SZ-Curls", "ez_curl", "reps", 3, 75, "Schulterbreit greifen, Oberkörper ruhig. Unten den Arm ganz strecken, oben kurz anspannen.", 2.5, 10, 15],
+  ]],
+  ["Beine + Schultern", [
+    ["Beinpresse", "leg_press", "reps", 3, 150, "Schont den unteren Rücken besser als Kniebeugen. Füße schulterbreit, Knie zeigen in Richtung Zehen. Nur so tief, dass der Po am Polster bleibt. Oben die Knie nicht ganz durchdrücken.", 5, 8, 12],
+    ["Beinbeuger (Maschine)", "leg_curl", "reps", 3, 90, "Sitzend ist besser als liegend, weil der Muskel mehr gedehnt wird. Langsam zurückgehen lassen.", 2.5, 10, 15],
+    ["Beinstrecker (Maschine)", "leg_ext", "reps", 3, 90, "Oben 1 s halten, langsam ablassen. Bei Knieschmerz Bewegung kürzer machen.", 2.5, 10, 15],
+    ["Schulterdrücken Kurzhanteln (sitzend)", "shoulder_press", "reps", 3, 120, "kg pro Hand. Lehne fast senkrecht, Rücken bleibt an der Lehne. Ellbogen etwas vor dem Körper, nicht ins Hohlkreuz drücken.", 2, 8, 12],
+    ["Seitheben Kurzhanteln", "lateral_raise", "reps", 3, 60, "kg pro Hand. Leicht anfangen. Nur bis Schulterhöhe, die Ellbogen führen, kein Schwung.", 1, 12, 20],
+    ["Reverse Butterfly", "reverse_fly", "reps", 3, 60, "Leichtes Gewicht, Schulterblätter zusammenziehen", null, null, null],
+    ["Wadenheben", "calf_raise", "reps", 3, 60, "An der Maschine oder auf einer Stufe. Unten 1 bis 2 s dehnen, oben 1 s halten, nicht wippen.", 5, 10, 15],
+    ["Laufband bergauf", "treadmill", "cardio", 1, 0, "8 bis 12 % Steigung, 4,5 bis 5,5 km/h, nicht festhalten", null, null, null],
+  ]],
+];
+const PLANS6_KEY = "tagesplan-train-v6";
 // Pro laufendem Training: entfernte und dazugenommene Übungen (überlebt Neuladen)
 const RUN_KEY = "tagesplan-train-run";
 
@@ -120,6 +144,26 @@ export function createTraining(ctx) {
     await seedList(EXTRA3, EXTRA3_KEY, /core/i, (x) => x.pattern === "dead_bug");
     await seedList(EXTRA5, EXTRA5_KEY, /core/i, (x) => /^(dead_bug|plank|situp|side_plank|pallof)$/.test(x.pattern), true);
     await seedList(EXTRA4, EXTRA4_KEY, /rücken/i, (x) => /^(lat_wide|lat_close|row_incline|row_single|face_pull|hyperext)$/.test(x.pattern), true);
+    await seedPlans(PLANS6, PLANS6_KEY);
+  }
+
+  // Ganze Pläne einmalig anlegen; vorhandene Übungen gleichen Namens werden wiederverwendet
+  async function seedPlans(plans, key) {
+    try { if (localStorage.getItem(key)) return; } catch {}
+    const have = new Set(T.exercises.map((x) => x.name.toLowerCase()));
+    const missing = plans.flatMap(([, list]) => list).filter(([n]) => !have.has(n.toLowerCase()));
+    if (missing.length) {
+      const { data, error } = await db.from("exercises").insert(missing.map(([name, pattern, mode, sets, rest_sec, notes, step_kg, rep_min, rep_max]) => ({ name, pattern, mode, sets, rest_sec, notes, step_kg, rep_min, rep_max }))).select();
+      if (error) return;
+      T.exercises.push(...(data ?? []));
+    }
+    for (const [name, list] of plans) {
+      if (T.workouts.some((w) => w.name.toLowerCase() === name.toLowerCase())) continue;
+      const ids = list.map(([n]) => T.exercises.find((x) => x.name.toLowerCase() === n.toLowerCase())?.id).filter(Boolean);
+      const { data } = await db.from("workouts").insert({ name, exercise_ids: ids }).select().single();
+      if (data) T.workouts.push(data);
+    }
+    try { localStorage.setItem(key, "1"); } catch {}
   }
 
   // Neue Übungen einmalig anlegen und in einen Plan einsortieren: hinter die erste (oder letzte) passende Übung
@@ -680,7 +724,7 @@ export function createTraining(ctx) {
     const points = sessions.slice(0, 12).reverse().map((s) => ({ date: isoDate(new Date(s.started_at)), kg: metric(x, setsOf(s.id, x.id)).v }));
     form.innerHTML = `<div class="ex-hero">${figureSvg(x.pattern, { size: 220 })}</div>
       <h3 class="detail-title">${esc(x.name)}</h3>
-      ${x.notes ? `<p class="small">${esc(x.notes).replace(/\n/g, "<br>")}</p>` : ""}
+      ${x.notes ? `<p class="small">${esc(t(x.notes)).replace(/\n/g, "<br>")}</p>` : ""}
       <dl class="details">
         <dt>${t("Bestwert")}</dt><dd>${best.v ? num(best.v) + " " + best.u : "–"}</dd>
         <dt>${t("Standard")}</dt><dd>${t("{n} Sätze · {s} s Pause", { n: x.sets, s: x.rest_sec })}</dd>

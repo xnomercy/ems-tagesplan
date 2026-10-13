@@ -263,7 +263,7 @@ const EX_ALIAS = {
   overhead_ext: "trizeps seil vorne überkopf nach vorne triceps triseps halat öne baş üstü",
   skullcrusher: "sz stirn stirndrücken french press skull alın ez bar",
   curl: "bizeps curl biceps pazı",
-  bench: "bank bankdrücken bench göğüs press",
+  bench: "bank bankdrücken flachbank flach bench göğüs press düz dambıl",
   face_pull: "face pulls facepull gesicht seil hintere schulter yüz halat arka omuz",
   hyperext: "hyperextension hyperextensions rückenstrecker unterer rücken bel sırt ekstansiyon",
   rdl: "rumänisch kreuzheben deadlift romanian rdl ölü kaldırma",
@@ -276,6 +276,17 @@ const EX_ALIAS = {
   dead_hang: "hängen hang dead stange klimmzugstange barfiks asılma asılı",
   situp: "sit ups situps situp crunch crunches bauchpresse mekik",
   pallof: "pallof press anti rotation",
+  bench_incline: "schrägbank schräg schrägbankdrücken incline obere brust eğimli göğüs press dambıl",
+  fly: "fliegende flys fly butterfly kurzhantel brust dambıl açma göğüs fly",
+  cable_press: "kabel seil brust nach vorne drücken crossover kablo göğüs öne itme",
+  hammer_curl: "hammer hammercurls hammer curls çekiç curl",
+  ez_curl: "sz curl curls sz stange ez bar pazı",
+  shoulder_press: "schulterdrücken schulter drücken überkopf military omuz press dambıl",
+  lateral_raise: "seitheben seitlich heben lateral raise yana açış omuz",
+  leg_press: "beinpresse beine presse leg press bacak pres",
+  leg_curl: "beinbeuger beine beugen leg curl hamstring arka bacak",
+  leg_ext: "beinstrecker beine strecken leg extension ön bacak",
+  calf_raise: "wade waden wadenheben calf baldır",
   treadmill: "laufband bergauf bergsteigen gehen cardio koşu bandı yürüyüş eğim",
 };
 const stem5 = (w) => w.toLocaleLowerCase("de-DE").slice(0, 5);
@@ -289,15 +300,20 @@ export function findExercise(s, exercises = []) {
     const own = new Set(words(x.name).map(stem5));
     const alias = new Set(words(EX_ALIAS[x.pattern] ?? "").filter((w) => w.length > 1).map(stem5));
     let sc = 0;
-    for (const w of said) { if (own.has(w)) sc += 2; else if (alias.has(w)) sc += 1; }
+    // Gleichstand: mehr getroffene Wörter gewinnen ("çekiç curl" → Hammer Curls statt Bizeps-Curl)
+    for (const w of said) { if (own.has(w)) sc += 2.01; else if (alias.has(w)) sc += 1.01; }
     if (sc > score) { best = x; score = sc; }
   }
-  return score >= 2 ? best : null;
+  return score >= 2.01 ? best : null;
 }
+
+const PLAN_TR = [[/göğüs|pazı|biceps|brust/i, /brust/i], [/bacak|omuz|bein|schulter/i, /beine/i], [/sırt|triseps|rücken/i, /rücken/i], [/karın|core|stabil/i, /core/i]];
 
 function trainingIntent(s, { exercises = [], workouts = [], running = false } = {}) {
   const hasTrainWord = TRAIN_WORD.test(s);
-  const workout = workouts.find((w) => words(w.name).filter((x) => x.length > 2).some((x) => rx(x.replace(/[^\p{L}\d]/gu, "")).test(s)));
+  // Plan per Namenswort finden, auf Türkisch über feste Stichwörter ("göğüs" → Brust + Bizeps)
+  const workout = workouts.find((w) => words(w.name).filter((x) => x.length > 2).some((x) => rx(x.replace(/[^\p{L}\d]/gu, "")).test(s)))
+    ?? PLAN_TR.map(([re, name]) => re.test(s) && workouts.find((w) => name.test(w.name))).find(Boolean);
   if (STOP.test(s) && (hasTrainWord || running) && !/\d/.test(s)) return { type: "training", action: "stop" };
   if (rx(`fortsetz${W}|setz${W}\\s+(?:das\\s+)?training\\s+fort|weiter\\s*machen|weitertrainieren|devam${W}`).test(s) && hasTrainWord) return { type: "training", action: "resume" };
   if (START.test(s) && (hasTrainWord || workout)) return { type: "training", action: "start", workout: workout ?? null };

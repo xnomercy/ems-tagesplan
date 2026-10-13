@@ -14,6 +14,7 @@ export const GROUPS = {
   triceps: { label: "Trizeps" },
   biceps: { label: "Bizeps" },
   core: { label: "Bauch + Rumpf" },
+  calves: { label: "Waden" },
   neck: { label: "Nacken" },
 };
 // Pro Bild: Hauptmuskel zählt 1, mitarbeitende Muskeln 0,5
@@ -38,6 +39,17 @@ export const MUSCLES = {
   plank: { core: 1 },
   situp: { core: 1 },
   neck_curl: { neck: 1 },
+  bench_incline: { chest: 1, shoulders: 0.5, triceps: 0.5 },
+  fly: { chest: 1 },
+  cable_press: { chest: 1, shoulders: 0.5 },
+  hammer_curl: { biceps: 1 },
+  ez_curl: { biceps: 1 },
+  shoulder_press: { shoulders: 1, triceps: 0.5 },
+  lateral_raise: { shoulders: 1 },
+  leg_press: { quads: 1, glutes: 0.5 },
+  leg_curl: { hams: 1 },
+  leg_ext: { quads: 1 },
+  calf_raise: { calves: 1 },
 };
 const PULL = ["back", "rear"], PUSH = ["chest", "shoulders"];
 // Ampel für Wochensätze: < 4 rot, 4–9 gelb, 10–20 grün, darüber hoch (Pelland 2024)
@@ -45,10 +57,10 @@ export const band = (n) => (n < 4 ? "low" : n < 10 ? "mid" : n <= 20 ? "ok" : "h
 export const groupOf = (pattern) => Object.entries(MUSCLES[pattern] ?? {}).find(([, f]) => f === 1)?.[0] ?? (pattern === "treadmill" ? "cardio" : "other");
 
 // Wiederholungsbereich: Isolation und Rumpf 10–15, sonst 8–12; pro Übung änderbar
-const ISO = ["face_pull", "reverse_fly", "pushdown", "overhead_ext", "curl", "dead_bug", "pallof", "situp", "neck_curl"];
+const ISO = ["face_pull", "reverse_fly", "pushdown", "overhead_ext", "curl", "dead_bug", "pallof", "situp", "neck_curl", "fly", "cable_press", "hammer_curl", "ez_curl", "lateral_raise", "leg_curl", "leg_ext", "calf_raise"];
 export const repRange = (x) => [x.rep_min ?? (ISO.includes(x.pattern) ? 10 : 8), x.rep_max ?? (ISO.includes(x.pattern) ? 15 : 12)];
 // Pause: schwere Grundübungen 2–3 Min., Maschinen 1,5–2 Min., Isolation/Rumpf 60–90 s (Singer 2024, Schoenfeld 2016)
-const HEAVY = ["rdl", "hip_thrust", "row_incline", "bench"], MACHINE = ["lat_wide", "lat_close", "row_single", "skullcrusher"];
+const HEAVY = ["rdl", "hip_thrust", "row_incline", "bench", "bench_incline", "leg_press", "shoulder_press"], MACHINE = ["lat_wide", "lat_close", "row_single", "skullcrusher", "leg_curl", "leg_ext"];
 export const restRange = (x) => (HEAVY.includes(x.pattern) ? [120, 180] : MACHINE.includes(x.pattern) ? [90, 120] : x.mode === "cardio" ? [0, 0] : [60, 90]);
 const stepOf = (x, top) => Number(x.step_kg) || (top < 10 ? 1 : ["rdl", "hip_thrust"].includes(x.pattern) ? 5 : 2.5);
 
@@ -303,12 +315,16 @@ export function analyse({ exercises, sessions, sets, body = [], now = Date.now()
   if (stats.length) {
     const sum14 = (g) => Object.values(perDay).reduce((a, d) => a + (d[g] ?? 0), 0);
     const missing = ["quads", "hams", "chest", "shoulders"].filter((g) => sum14(g) === 0);
-    if (missing.length) tip("plan", "Ganz ohne Training: {g}. Für Muskelaufbau und Fettabbau sollten alle großen Muskeln 2× pro Woche dran sein. Ein zweiter Plan „Beine + Drücken“ (Beinpresse, Beinbeuger, Brustpresse, Schulterdrücken) würde das abdecken.", { g: missing.map((g) => GROUPS[g].label) });
-    for (const g of ["back", "rear", "lower", "core", "triceps"]) {
-      if (groups[g] > 0 && groups[g] < 4) tip("plan", "{g}: nur {n} harte Sätze diese Woche (wirksam ab etwa 4, gut sind 10 bis 20).", { g: GROUPS[g].label, n: Math.round(groups[g] * 10) / 10 });
+    if (missing.length) tip("plan", "Ganz ohne Training: {g}. Für Muskelaufbau und Fettabbau sollten alle großen Muskeln 2× pro Woche dran sein. Die Pläne „Brust + Bizeps“ und „Beine + Schultern“ decken das ab.", { g: missing.map((g) => GROUPS[g].label) });
+    const low = [];
+    for (const g of ["back", "rear", "lower", "chest", "shoulders", "quads", "hams", "glutes", "core", "triceps", "biceps"]) {
+      if (groups[g] > 0 && groups[g] < 4) low.push(g);
       else if (groups[g] >= 4 && freq[g] < 2) tip("plan", "{g}: {n} Sätze, aber nur an {d} Tag. Auf 2 Tage verteilt bringt das mehr.", { g: GROUPS[g].label, n: Math.round(groups[g] * 10) / 10, d: freq[g] });
       else if (groups[g] > 20) tip("info", "{g}: {n} harte Sätze diese Woche. Mehr als 20 bringt kaum noch zusätzlich, kostet aber Erholung.", { g: GROUPS[g].label, n: Math.round(groups[g]) });
     }
+    // Einzeln bis 2 Gruppen, sonst eine Sammelzeile (die Balken zeigen die Zahlen)
+    if (low.length > 2) tip("plan", "Unter 4 harten Sätzen diese Woche: {g}. Wirksam ab etwa 4, gut sind 10 bis 20 pro Muskel.", { g: low.map((g) => GROUPS[g].label) });
+    else for (const g of low) tip("plan", "{g}: nur {n} harte Sätze diese Woche (wirksam ab etwa 4, gut sind 10 bis 20).", { g: GROUPS[g].label, n: Math.round(groups[g] * 10) / 10 });
     if (push > pull) tip("plan", "Mehr Drücken ({p}) als Ziehen ({z}) diese Woche. Für gesunde Schultern mindestens so viel ziehen wie drücken.", { p: Math.round(push), z: Math.round(pull) });
   }
   if (stats.length && last7 < 2) tip("plan", "Diese Woche {n} Trainingstag(e). Für Kraft und Muskeln mindestens 2, besser 3.", { n: last7 });
