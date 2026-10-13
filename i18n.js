@@ -628,6 +628,7 @@ const TR = {
   "nicht halal: {x}": "helal değil: {x}",
   "Was fehlt? z. B. Milch, 6 Eier, 500 g Hack": "Ne eksik? ör. süt, 6 yumurta, 500 g kıyma",
   "Hinzufügen": "Ekle",
+  "Was fehlt?": "Ne eksik?",
   "Neuer Artikel": "Yeni ürün",
   "Kein Datum": "Tarih yok",
   "Mit Details anlegen": "Ayrıntılarla ekle",

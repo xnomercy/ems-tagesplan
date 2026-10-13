@@ -341,8 +341,8 @@ export function createShopping(ctx) {
         ${(S.store === "alle" && x.store !== "supermarkt") || x.note || x.flag || x.urgent || x.need_by ? `<span class="sub">${x.urgent ? `<span class="shop-flag haram">${t("dringend")}</span> ` : ""}${x.need_by && !x.done ? `<span class="shop-flag ${x.need_by <= today ? "haram" : ""}">${t("bis {d}", { d: x.need_by === today ? t("heute") : fmtDay(x.need_by, { weekday: "short" }) })}</span> ` : ""}${S.store === "alle" && x.store !== "supermarkt" ? `<b>${esc(lbl(x.store))}</b>` : ""}${x.note ? " " + esc(x.note) : ""} ${flagHtml(x)}</span>` : ""}</button>
         ${x.price != null ? `<span class="shop-price">${eur(x.price)}</span>` : ""}
       </div>`;
-    let html = `<form class="shop-add" id="shop-add" autocomplete="off"><input id="shop-in" placeholder="${t("Was fehlt? z. B. Milch, 6 Eier, 500 g Hack")}" enterkeyhint="done">
-      <button type="button" class="round-btn shop-more" id="shop-more" aria-label="${t("Mit Details anlegen")}"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
+    let html = `<form class="shop-add" id="shop-add" autocomplete="off"><input id="shop-in" placeholder="${t("Was fehlt?")}" enterkeyhint="done">
+      <button type="button" class="round-btn shop-more" id="shop-more" aria-label="${t("Mit Details anlegen")}"><svg viewBox="0 0 24 24"><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M17.5 3.5a2.1 2.1 0 0 1 3 3L13 14l-4 1 1-4z"/></svg></button>
       <button class="primary" aria-label="${t("Hinzufügen")}">+</button></form>
       <div class="chips shop-ac" id="shop-ac" hidden></div>`;
     if (stores.length > 1) html += `<div class="chips shop-stores"><button type="button" class="chip ${S.store === "alle" ? "on" : ""}" data-store="alle">${t("Alle")} ${all.filter((x) => !x.done).length}</button>${stores.map((k) => `<button type="button" class="chip ${S.store === k ? "on" : ""}" data-store="${esc(k)}">${esc(lbl(k))} ${all.filter((x) => x.store === k && !x.done).length}</button>`).join("")}</div>`;
@@ -394,7 +394,7 @@ export function createShopping(ctx) {
       if (!v) return;
       const r = await add(parseItems(v));
       if (r.msg) toast(r.msg, r.undo ? async () => { await r.undo(); rerender(); } : null);
-      $("#shop-in")?.focus();
+      $("#shop-in")?.blur();
     };
     host.querySelectorAll("[data-store]").forEach((b) => (b.onclick = () => { S.store = b.dataset.store; render(host); }));
     host.querySelectorAll("[data-shop-done]").forEach((b) => (b.onclick = () => { const x = byId(b.dataset.shopDone); if (x) setDone(x, !x.done); }));
@@ -428,7 +428,7 @@ export function createShopping(ctx) {
     const draw = (f = {}) => {
       const val = (k, d) => esc(f[k] ?? d ?? "");
       form.innerHTML = `<h3>${t(isNew ? "Neuer Artikel" : "Artikel")}</h3>
-        <label>${t("Name")}</label><input name="name" value="${val("name", x.name)}" required autocomplete="off" ${isNew ? "autofocus" : ""}>
+        <label>${t("Name")}</label><input name="name" value="${val("name", x.name)}" required autocomplete="off" enterkeyhint="done">
         <div class="chips shop-ac" id="es-ac" hidden></div><p class="small" id="es-flag"></p>
         <div class="row2"><div><label>${t("Menge")}</label><input name="qty" value="${val("qty", x.qty)}" placeholder="${t("z. B. 2 l, 500 g, 6")}"></div>
         <div><label>${t("Preis (€)")}</label><input name="price" inputmode="decimal" value="${val("price", x.price != null ? String(x.price).replace(".", ",") : "")}" placeholder="${t("z. B. 1,29")}"></div></div>
@@ -455,7 +455,13 @@ export function createShopping(ctx) {
         form.category.value = gg.category;
         if (gg.prev?.price != null && !form.price.value) form.price.value = String(gg.prev.price).replace(".", ",");
         if (gg.prev?.qty && !form.qty.value) form.qty.value = gg.prev.qty;
-        if (gg.store !== v.store) { v.store = gg.store; const k = keep(); draw(k); form.name.focus(); form.name.setSelectionRange(k.name.length, k.name.length); }
+        if (gg.store !== v.store) {
+          v.store = gg.store;
+          // Chips direkt umschalten, kein Neuzeichnen: sonst springt der Fokus und die Tastatur geht auf
+          const chips = [...form.querySelectorAll("[data-es]")];
+          if (chips.some((b) => b.getAttribute("data-es") === gg.store)) chips.forEach((b) => b.classList.toggle("on", b.getAttribute("data-es") === gg.store));
+          else draw(keep());
+        }
       };
       nameIn.oninput = () => {
         paintFlag();
@@ -466,7 +472,7 @@ export function createShopping(ctx) {
       };
       nameIn.onchange = applyGuess;
       paintFlag();
-      $("#es-urgent").onclick = () => { v.urgent = !v.urgent; draw(keep()); };
+      $("#es-urgent").onclick = (e) => { v.urgent = !v.urgent; e.currentTarget.classList.toggle("on", v.urgent); };
       if (!isNew) $("#shop-del").onclick = async () => {
         const copy = { ...x };
         await remove(x); closeSheet(sheet);
