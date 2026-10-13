@@ -1,7 +1,7 @@
 // Nur für ?demo: Daten im Speicher statt Supabase, zum Ausprobieren und Testen.
 const uid = "demo-user";
 const id = () => Math.random().toString(36).slice(2);
-const tables = { settings: [], routines: [], items: [], completions: [], supplies: [], push_subscriptions: [] };
+const tables = { settings: [], routines: [], items: [], completions: [], supplies: [], push_subscriptions: [], exercises: [], workouts: [], workout_sessions: [], workout_sets: [] };
 const defaults = {
   settings: () => ({ user_id: uid, lat: null, lng: null, prayer_method: 13, calendar_token: "demo", nag_minutes: 20 }),
   routines: () => ({ id: id(), user_id: uid, category: "sonstiges", prayer: null, at_time: null, anchor_prayer: null, anchor_offset: 15, priority: "normal", days: [1, 2, 3, 4, 5, 6, 7], notes: null, active: true }),
@@ -9,6 +9,10 @@ const defaults = {
   completions: () => ({ user_id: uid }),
   supplies: () => ({ id: id(), user_id: uid, unit: "Kapseln", stock: 0, per_day: 1, counted_on: new Date().toISOString().slice(0, 10), warn_days: 7, created_at: new Date().toISOString() }),
   push_subscriptions: () => ({ user_id: uid }),
+  exercises: () => ({ id: id(), user_id: uid, pattern: "generic", notes: null, sets: 3, rest_sec: 90, created_at: new Date().toISOString() }),
+  workouts: () => ({ id: id(), user_id: uid, exercise_ids: [], created_at: new Date().toISOString() }),
+  workout_sessions: () => ({ id: id(), user_id: uid, workout_id: null, name: null, started_at: new Date().toISOString(), finished_at: null, notes: null }),
+  workout_sets: () => ({ id: id(), user_id: uid, set_no: 1, kg: null, reps: null, created_at: new Date().toISOString() }),
 };
 
 class Query {

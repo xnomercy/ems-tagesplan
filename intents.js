@@ -80,7 +80,7 @@ function dateTime(s, now, lang) {
 }
 const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-export function parseIntent(text, now = new Date(), targets = [], lang = "de", supplies = []) {
+export function parseIntent(text, now = new Date(), targets = [], lang = "de", supplies = [], training = {}) {
   const s = text.replace(/İ/g, "i").replace(/[!?,.]/g, " ").replace(/\s+/g, " ").trim();
   if (!s) return null;
 
@@ -108,6 +108,9 @@ export function parseIntent(text, now = new Date(), targets = [], lang = "de", s
 
   const sup = supplyIntent(s, supplies, lang);
   if (sup) return sup;
+
+  const tr = trainingIntent(s, training);
+  if (tr) return tr;
 
   // Checkliste: "füge Milch zur Einkaufsliste hinzu" / "Alışveriş listesine süt ekle"
   let m = s.match(/(?:füg\p{L}*|setz\p{L}*|pack\p{L}*|schreib\p{L}*)\s+(.+?)\s+(?:zur|zum|zu|auf die|auf|in die|in)\s+(.+?)(?:\s+hinzu|\s+dazu|\s+drauf|\s+rein)?$/iu);
@@ -228,4 +231,60 @@ function supplyIntent(s, supplies, lang) {
     if (supply) return { type: "vorrat", mode: "info", supply };
   }
   return null;
+}
+
+// ---------- Training: "Starte Training", "Latziehen 50 kg 12 Wiederholungen", "3x12 mit 40 kg Seil runter", "Training beenden" ----------
+const TRAIN_WORD = rx(`\\p{L}*training${W}|workout|gym|fitness|antrenman${W}|spor${W}|idman${W}`);
+const START = rx(`start${W}|beginn${W}|anfangen|fang${W}\\s+an|los\\s+geht${W}|başla${W}|başlat${W}`);
+const STOP = rx(`beend${W}|fertig|abschließen|stopp${W}|schluss|bitir${W}|bitti|tamamla${W}`);
+// Zusätzliche Wörter je Bild, damit auch Umschreibungen die richtige Übung finden
+const EX_ALIAS = {
+  lat_wide: "latziehen lat breit weit lange stange wide geniş uzun bar çekme",
+  lat_close: "latziehen lat eng enge kurze stange close dar yakın çekme",
+  row_incline: "rudern ruder rudermaschine schräg liegend brust row kürek eğimli göğüs",
+  row_single: "einarmig einzeln einer arm maschine sitzend griffe tek kol oturarak",
+  pushdown: "trizeps seil runter unten drücken pushdown triceps triseps halat aşağı",
+  overhead_ext: "trizeps seil vorne überkopf nach vorne triceps triseps halat öne baş üstü",
+  skullcrusher: "sz stirn stirndrücken french press skull alın ez bar",
+  curl: "bizeps curl biceps pazı",
+  bench: "bank bankdrücken bench göğüs press",
+};
+const stem5 = (w) => w.toLocaleLowerCase("de-DE").slice(0, 5);
+const STOP_W = new Set(["am", "an", "im", "in", "um", "zu", "mit", "nach", "der", "die", "das", "und", "den", "dem", "ve", "ile", "bir"]);
+const words = (x) => x.toLocaleLowerCase("de-DE").split(/[^\p{L}\d]+/u).filter((w) => w.length > 1 && !STOP_W.has(w));
+
+export function findExercise(s, exercises = []) {
+  const said = new Set(words(s).map(stem5));
+  let best = null, score = 0;
+  for (const x of exercises) {
+    const own = new Set(words(x.name).map(stem5));
+    const alias = new Set(words(EX_ALIAS[x.pattern] ?? "").filter((w) => w.length > 1).map(stem5));
+    let sc = 0;
+    for (const w of said) { if (own.has(w)) sc += 2; else if (alias.has(w)) sc += 1; }
+    if (sc > score) { best = x; score = sc; }
+  }
+  return score >= 2 ? best : null;
+}
+
+function trainingIntent(s, { exercises = [], workouts = [], running = false } = {}) {
+  const hasTrainWord = TRAIN_WORD.test(s);
+  const workout = workouts.find((w) => words(w.name).filter((x) => x.length > 2).some((x) => rx(x.replace(/[^\p{L}\d]/gu, "")).test(s)));
+  if (STOP.test(s) && (hasTrainWord || running) && !/\d/.test(s)) return { type: "training", action: "stop" };
+  if (START.test(s) && (hasTrainWord || workout)) return { type: "training", action: "start", workout: workout ?? null };
+
+  let sets = null, reps = null, kg = null, m;
+  if ((m = s.match(/(\d{1,2})\s*[x×]\s*(\d{1,3})(?!\s*(?:kg|kilo))/iu))) { sets = +m[1]; reps = +m[2]; }
+  if ((m = s.match(rx(`(\\d+(?:[.,]\\d+)?)\\s*(?:kg|kilo${W}|kilogramm)`)))) kg = Number(m[1].replace(",", "."));
+  if (reps == null && (m = s.match(rx(`(\\d{1,3})\\s*(?:mal|wiederholung${W}|wdh|reps?|tekrar${W}|kere)`)))) reps = +m[1];
+  if (sets == null && (m = s.match(rx(`(\\d{1,2})\\s*(?:sätze|satz|sets?|seri${W}|set)`)))) sets = +m[1];
+  // "35 kg 10": die übrige Zahl sind die Wiederholungen
+  if (kg != null && reps == null) {
+    const rest = s.replace(rx(`(\\d+(?:[.,]\\d+)?)\\s*(?:kg|kilo${W}|kilogramm)`), " ").replace(rx(`(\\d{1,2})\\s*(?:sätze|satz|sets?|seri${W}|set)`), " ").match(/\b(\d{1,3})\b/);
+    if (rest) reps = +rest[1];
+  }
+  if (kg == null && reps == null) return null;
+  const clean = s.replace(/\d+(?:[.,]\d+)?/g, " ");
+  const exercise = findExercise(clean, exercises);
+  if (!exercise && !running) return null;
+  return { type: "training", action: "log", exercise, kg, reps, sets: sets ?? 1 };
 }

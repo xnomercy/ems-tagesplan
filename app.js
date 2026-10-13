@@ -2,12 +2,13 @@ import { parse, isoDate } from "./parser.js";
 import { parseTr } from "./parser-tr.js";
 import { parseIntent, extractPrio, extractRepeat } from "./intents.js";
 import { t, LANG, LOCALE, setLang, translateStatic } from "./i18n.js";
+import { createTraining } from "./training.js";
 
 const SUPABASE_URL = "https://hpxdhtuabzqwyslzcmbt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kKiQdntJd893YvBPFx7fhw_FYzlwwtz";
 const DEMO = new URLSearchParams(location.search).has("demo");
 // Bei jeder Veröffentlichung zusammen mit version.json und dem Cache-Namen in sw.js hochzählen
-const APP_VERSION = "15";
+const APP_VERSION = "16";
 const db = DEMO
   ? (await import("./mock.js")).db
   : (await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm")).createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -76,6 +77,7 @@ async function showScreen() {
   if (state.user) {
     await ensureSetup();
     await refresh();
+    training.load().then(() => render());
   }
 }
 
@@ -249,6 +251,8 @@ function renderDay() {
     <div class="meta"><span>${t("Fortschritt")}</span><span>${done} / ${total} · ${pct}%</span></div>
   </section>`;
   html += dayStrip();
+  const run = training.active();
+  if (run) html += `<div class="hint">${t("Training läuft: {x}", { x: esc(run.name ?? "") })} <button data-open-training>${t("Weiter")}</button></div>`;
   const low = lowSupplies();
   if (isToday && low.length) html += `<div class="hint warn">${t("Vorrat")}: ${low.map((x) => `${esc(x.name)} ${supplyDays(x) <= 0 ? t("leer") : t("noch {n} Tage", { n: supplyDays(x) })}`).join(", ")} <button data-goto="mehr">${t("Ansehen")}</button></div>`;
   if (state.settings && state.settings.lat == null) html += `<div class="hint">${t("Für automatische Gebetszeiten einmal den Standort setzen.")} <button data-goto="mehr">${t("Jetzt einrichten")}</button></div>`;
@@ -278,13 +282,28 @@ function setPlanGroup(g) { planGroup = g; try { localStorage.setItem("tagesplan-
 const DAYPARTS = [["morgens", "Morgens"], ["mittags", "Mittags"], ["abends", "Abends"], ["flex", "Ohne feste Uhrzeit"]];
 const daypart = (time) => !time ? "flex" : time < "11:00" ? "morgens" : time < "17:00" ? "mittags" : "abends";
 
+let planTab = "routinen";
+try { planTab = localStorage.getItem("tagesplan-plan-tab") || "routinen"; } catch {}
+function setPlanTab(v) { planTab = v; try { localStorage.setItem("tagesplan-plan-tab", v); } catch {} }
+
 function renderPlan() {
+  const tabs = `<div class="seg plan-tabs" id="plan-tab">
+      <button type="button" data-pt="routinen" class="${planTab === "routinen" ? "on" : ""}">${t("Routinen")}</button>
+      <button type="button" data-pt="training" class="${planTab === "training" ? "on" : ""}">${t("Training")}</button>
+    </div>`;
+  const bindTabs = () => $("#view-plan").querySelectorAll("#plan-tab button").forEach((b) => (b.onclick = () => { setPlanTab(b.dataset.pt); renderPlan(); window.scrollTo(0, 0); }));
+  if (planTab === "training") {
+    $("#view-plan").innerHTML = tabs + `<div id="training-host"></div>`;
+    bindTabs();
+    training.render($("#training-host"));
+    return;
+  }
   const byTime = planGroup === "zeit";
   const groups = {};
   const timeOf = (r) => routineTime(r, state.pt);
   for (const r of state.routines) (groups[byTime ? daypart(timeOf(r)) : r.category] ??= []).push(r);
   if (byTime) for (const list of Object.values(groups)) list.sort((a, b) => (timeOf(a) ?? "99").localeCompare(timeOf(b) ?? "99"));
-  let html = `<div class="section-head"><h3>${t("Routinen")}</h3><span class="muted">${t("{n} Einträge", { n: state.routines.length })}</span></div>
+  let html = tabs + `<div class="section-head"><h3>${t("Routinen")}</h3><span class="muted">${t("{n} Einträge", { n: state.routines.length })}</span></div>
     <div class="seg" id="group-seg">
       <button type="button" data-g="zeit" class="${byTime ? "on" : ""}">${t("Nach Tageszeit")}</button>
       <button type="button" data-g="bereich" class="${byTime ? "" : "on"}">${t("Nach Bereich")}</button>
@@ -302,6 +321,7 @@ function renderPlan() {
   }
   html += `<button class="primary" id="new-routine">${t("Neue Routine")}</button>`;
   $("#view-plan").innerHTML = html;
+  bindTabs();
   $("#view-plan").querySelectorAll("#group-seg button").forEach((b) => (b.onclick = () => { setPlanGroup(b.dataset.g); renderPlan(); }));
 }
 
@@ -660,6 +680,13 @@ async function setItemDone(id, on) {
 
 const findEntry = (id) => [...state.entries, ...state.open].find((e) => e.id === id) ?? (state.termineCache ?? []).find((e) => e.id === id);
 
+function openTraining(startIt = false) {
+  setPlanTab("training");
+  switchView("plan");
+  if (startIt) training.start();
+}
+document.addEventListener("click", (ev) => { if (ev.target.closest("[data-open-training]")) openTraining(); });
+
 document.addEventListener("click", async (ev) => {
   const t = ev.target.closest("[data-toggle],[data-edit-item],[data-edit-routine],[data-day],[data-open-day],[data-goto],[data-detail],#new-routine,#new-item");
   if (!t) return;
@@ -768,7 +795,8 @@ function openDetail(e) {
     <dl class="details">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
     ${cl.length ? `<p class="eyebrow" style="margin-top:14px">${t("Checkliste")}</p><div class="checklist">${cl.map((c, i) =>
       `<label class="cl-item"><input type="checkbox" data-cl="${i}" ${c.d ? "checked" : ""}><span>${esc(c.t)}</span></label>`).join("")}</div>` : ""}
-    <button type="button" class="primary" id="d-done">${t(e.done ? "Wieder öffnen" : "Erledigt")}</button>
+    ${isRoutine && raw.category === "training" && !e.done ? `<button type="button" class="primary" id="d-train">${t(training.active() ? "Training fortsetzen" : "Training starten")}</button>` : ""}
+    <button type="button" class="${isRoutine && raw.category === "training" && !e.done ? "ghost" : "primary"}" id="d-done">${t(e.done ? "Wieder öffnen" : "Erledigt")}</button>
     <div class="row">
       <button type="button" class="ghost" id="d-edit">${t("Bearbeiten")}</button>
       ${isRoutine ? "" : `<button type="button" class="ghost danger" id="d-del">${t("Löschen")}</button>`}
@@ -784,6 +812,8 @@ function openDetail(e) {
     else await setItemDone(e.id, !e.done);
     closeSheet(sheet); refresh();
   };
+  const dt = $("#d-train");
+  if (dt) dt.onclick = () => { sheet.close(); openTraining(!training.active()); };
   $("#d-edit").onclick = () => { sheet.close(); isRoutine ? openRoutineSheet(raw) : openItemSheet(raw); };
   const del = $("#d-del");
   if (del) del.onclick = () => deleteEntry(e.kind, e.id, raw.id ? raw : undefined);
@@ -1017,6 +1047,17 @@ function bindSheetButtons(onDelete) {
   if (del) del.onclick = async () => { if (confirm(t("Wirklich löschen?"))) { await onDelete(); closeSheet(sheet); refresh(); } };
 }
 
+// ---------- Training ----------
+const training = createTraining({
+  db, t, esc, $, toast, openSheet, closeSheet, sheet, form, isoDate, fmtDay, LOCALE,
+  // Nach dem Training die Trainings-Routine von heute abhaken
+  onFinish: async () => {
+    const wd = weekday(new Date());
+    const r = state.routines.find((x) => x.active && x.category === "training" && x.days.includes(wd) && /kraft|training|gym|studio|rücken|brust|bein/i.test(x.title));
+    if (r) await setRoutineDone(r.id, true, isoDate(new Date()));
+  },
+});
+
 // ---------- Sprache ----------
 const voice = $("#voice");
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1101,7 +1142,8 @@ function targets() {
   state.routines.forEach((r) => add({ kind: "routine", id: r.id, title: r.title, prayer: r.prayer, done: false, raw: r, priority: r.priority }));
   return out;
 }
-const intentOf = (text) => parseIntent(text, new Date(), targets(), LANG, state.supplies ?? []);
+const intentOf = (text) => parseIntent(text, new Date(), targets(), LANG, state.supplies ?? [],
+  { exercises: training.exercises(), workouts: training.workouts(), running: !!training.active() });
 
 // Text ohne "jeden Monat" usw. parsen, die Wiederholung hängt sich an Termin oder Aufgabe
 function parseFull(text) {
@@ -1119,6 +1161,11 @@ function describe(cmd) {
   if (cmd.type === "gruppe") return [t("Routinen"), t(cmd.g === "zeit" ? "Nach Tageszeit" : "Nach Bereich")];
   if (cmd.type === "zeige") return [t("Anzeigen"), cmd.date ? fmtDay(cmd.date, { weekday: "long", day: "numeric", month: "long" }) : t({ heute: "Tag", termine: "Termine", plan: "Routinen", mehr: "Einstellungen", monat: "Monat", verlauf: "Verlauf", vorrat: "Supplement-Vorrat" }[cmd.view])];
   if (cmd.type === "suche") return [t("Suche"), cmd.q];
+  if (cmd.type === "training") {
+    if (cmd.action === "start") return [t("Training"), t("Starten") + (cmd.workout ? ": " + cmd.workout.name : "")];
+    if (cmd.action === "stop") return [t("Training"), t("Beenden")];
+    return [t("Satz"), `${cmd.exercise?.name ?? t("letzte Übung")} · ${cmd.sets > 1 ? cmd.sets + " × " : ""}${cmd.kg != null ? fmtNum(cmd.kg) + " kg" : ""}${cmd.reps != null ? " × " + cmd.reps : ""}`];
+  }
   if (cmd.type === "vorrat") {
     const name = cmd.supply?.name ?? cmd.name;
     if (cmd.mode === "info") return [t("Vorrat"), name];
@@ -1232,6 +1279,13 @@ async function runIntent(c) {
       if (c.view === "vorrat") { switchView("mehr"); return setTimeout(() => $("#vorrat")?.scrollIntoView({ behavior: "smooth" }), 300); }
       if (c.view === "termine") state.termMode = "liste";
       return switchView(c.view);
+    case "training": {
+      setPlanTab("training");
+      if (state.view !== "plan") switchView("plan");
+      const msg = await training.runVoice(c);
+      if (msg) toast(msg);
+      return;
+    }
     case "suche":
       state.search = c.q;
       return switchView("termine");
@@ -1406,6 +1460,7 @@ const HELP = {
     ["Abhaken", ["Asr erledigt", "Asr doch nicht erledigt"]],
     ["Ändern", ["Verschiebe Zahnarzt auf Freitag um 10", "Mach Steuer wichtig", "Pausiere Retinol", "Erinnere mich 30 Minuten vorher an Zahnarzt", "Füge Milch zur Einkaufsliste hinzu", "Lösche den Termin Zahnarzt"]],
     ["Anzeigen", ["Was steht morgen an", "Zeig mir die Termine", "Zeig den Monat", "Was habe ich erledigt", "Suche Zahnarzt", "Teile die Routinen nach Tageszeit auf", "Öffne die Einstellungen"]],
+    ["Training", ["Starte Training", "Latziehen breit 50 kg 12 Wiederholungen", "3x12 mit 30 kg Seil nach unten", "40 kg 10 mal", "Training beenden"]],
     ["Vorrat", ["Magnesium aufgefüllt 60", "Noch 40 Ashwagandha", "Wie lange reicht Magnesium", "Zeig den Vorrat"]],
     ["Einstellungen", ["Sprich Türkisch", "Dunkler Modus", "Heller Modus"]],
   ],
@@ -1414,6 +1469,7 @@ const HELP = {
     ["İşaretle", ["İkindiyi kıldım", "İkindiyi kılmadım"]],
     ["Değiştir", ["Diş doktorunu cumaya ertele", "Vergi önemli", "Retinol'ü durdur", "Diş doktoru için 1 saat önce hatırlat", "Alışveriş listesine süt ekle", "Diş doktoru randevusunu sil"]],
     ["Göster", ["Yarın neler var", "Randevuları göster", "Aylık görünüm", "Geçmişi göster", "Diş doktoru bul", "Rutinleri vakte göre sırala", "Ayarları aç"]],
+    ["Antrenman", ["Antrenmana başla", "Lat çekme geniş 50 kilo 12 tekrar", "Triseps halat aşağı 3 set 12 tekrar 30 kilo", "Antrenmanı bitir"]],
     ["Stok", ["Magnezyum doldurdum 60", "40 tane ashwagandha kaldı", "Magnezyum ne kadar yeter", "Stoku göster"]],
     ["Ayarlar", ["Almancaya geç", "Koyu mod", "Açık mod"]],
   ],
@@ -1543,7 +1599,7 @@ showLock();
 
 // ---------- Daten exportieren ----------
 async function exportData() {
-  const names = ["routines", "items", "completions", "supplies", "settings"];
+  const names = ["routines", "items", "completions", "supplies", "exercises", "workouts", "workout_sessions", "workout_sets", "settings"];
   const res = await Promise.all(names.map((n) => db.from(n).select("*")));
   const out = { exportiert: new Date().toISOString(), app_version: APP_VERSION };
   names.forEach((n, i) => (out[n] = res[i].data ?? []));

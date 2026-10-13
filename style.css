@@ -398,3 +398,55 @@ button.pick.empty { color: var(--muted); font-weight: 400; }
 #lock img { border-radius: 16px; }
 #lock h2 { margin: 6px 0 10px; font-size: 22px; }
 #lock .primary, #lock .ghost { max-width: 320px; width: 100%; }
+
+/* Training */
+.plan-tabs { margin-top: 14px; }
+.figure line { stroke-linecap: round; }
+.figure .fig { stroke: var(--petrol); stroke-width: 5; }
+.figure .eq { stroke: var(--tuerkis); stroke-width: 3.5; }
+.figure .frame { stroke: var(--muted); stroke-opacity: .35; stroke-width: 4; }
+.figure .head { fill: var(--petrol); }
+.plan-card h3 { margin: 2px 0 4px; font-size: 20px; }
+.plan-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.plan-figs { display: flex; gap: 4px; overflow-x: auto; margin: 10px -4px 4px; padding: 0 4px; scrollbar-width: none; }
+.plan-figs .figure { flex: none; background: var(--bg); border-radius: 10px; }
+.ex-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; border: 0; background: var(--card); color: var(--text); font: inherit; border-radius: 16px; padding: 8px 14px 8px 8px; margin-top: 8px; }
+.ex-row .figure { flex: none; background: var(--bg); border-radius: 12px; }
+.ex-body { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ex-body b { font-size: 16px; }
+.hist-card { display: flex; flex-direction: column; gap: 2px; }
+.run-hero h2 { margin: 4px 0 10px; }
+.ex-card { padding-bottom: 8px; }
+.ex-card.complete { background: var(--done-bg); }
+.ex-top { display: flex; gap: 12px; align-items: center; }
+.ex-top h3 { margin: 0 0 4px; font-size: 17px; }
+.fig-btn { flex: none; border: 0; padding: 0; background: var(--bg); border-radius: 14px; }
+.set-grid { display: grid; grid-template-columns: 40px 1fr 1fr 48px; gap: 8px; align-items: center; margin-top: 12px; }
+.set-grid > span:nth-child(-n+4) { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.set-no { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--soft); font-weight: 800; font-size: 14px; }
+.set-no.done { background: var(--done); color: #fff; }
+.set-val { font-size: 18px; font-weight: 800; padding-left: 12px; }
+.set-in { width: 100%; min-height: 44px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-size: 18px; font-weight: 700; text-align: center; padding: 0 6px; }
+.set-in::placeholder { color: var(--muted); opacity: .55; font-weight: 600; }
+.set-grid .check { justify-self: center; }
+.add-set { margin: 10px 0 2px; }
+#rest { position: fixed; left: 12px; right: 12px; bottom: calc(96px + env(safe-area-inset-bottom)); z-index: 60; display: flex; align-items: center; gap: 8px; background: #0B3D4A; color: #fff; border-radius: 16px; padding: 10px 10px 10px 16px; box-shadow: 0 8px 24px rgba(0,0,0,.2); }
+#rest span { flex: 1; font-size: 15px; }
+#rest b { font-size: 20px; font-variant-numeric: tabular-nums; margin-left: 4px; }
+#rest button { border: 0; border-radius: 10px; background: rgba(255,255,255,.14); color: #fff; font: inherit; font-weight: 700; padding: 8px 12px; }
+#rest.go { background: var(--done); }
+.ex-hero { display: flex; justify-content: center; background: var(--card); border-radius: 18px; padding: 10px; margin: 6px 0 10px; }
+svg.progress { width: 100%; height: auto; background: var(--card); border-radius: 14px; stroke: none; }
+.progress text { stroke: none; }
+.progress polyline { fill: none; stroke: var(--petrol); stroke-width: 3; stroke-linejoin: round; }
+.progress circle { fill: var(--tuerkis); }
+.progress text { fill: var(--muted); font-size: 11px; font-weight: 700; }
+.ex-hist div { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; border-bottom: 1px solid var(--soft); }
+.fig-pick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.fig-pick button { border: 2px solid transparent; background: var(--card); border-radius: 14px; padding: 6px 4px; display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--text); font: inherit; font-size: 11px; line-height: 1.2; }
+.fig-pick button.on { border-color: var(--petrol); }
+.w-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.w-row { display: flex; align-items: center; gap: 8px; background: var(--card); border-radius: 12px; padding: 4px 6px; }
+.w-row span { flex: 1; font-size: 14px; font-weight: 700; }
+.w-row button { width: 34px; height: 34px; border: 0; border-radius: 10px; background: var(--bg); color: var(--text); font-size: 16px; }
+.w-row button:disabled { opacity: .3; }
