@@ -1,14 +1,20 @@
 // Hält die App-Dateien offline bereit. Daten kommen immer frisch von Supabase.
-const CACHE = "tagesplan-v26";
-const SHELL = ["./", "index.html", "style.css", "app.js", "parser.js", "parser-tr.js", "i18n.js", "intents.js", "training.js", "figures.js", "analyse.js", "einkauf.js", "version.json", "manifest.webmanifest", "icon-192.png", "ems-logo.png", "ems-mark.png"];
+const CACHE = "tagesplan-v27";
+const SHELL = ["./", "index.html", "style.css", "app.js", "parser.js", "parser-tr.js", "i18n.js", "intents.js", "training.js", "figures.js", "analyse.js", "einkauf.js", "offline.js", "daylog.js", "halal-scan.js", "glaube.js", "wellness.js", "fristen.js", "rueckblick.js", "version.json", "manifest.webmanifest", "icon-192.png", "ems-logo.png", "ems-mark.png"];
 
 self.addEventListener("install", (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener("activate", (e) => e.waitUntil(
-  caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()),
+  caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE && !k.endsWith("-ext")).map((k) => caches.delete(k)))).then(() => self.clients.claim()),
 ));
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== "GET" || url.origin !== location.origin) return;
+  if (e.request.method !== "GET") return;
+  // Bibliotheken und Schrift von außen: feste Versionen, einmal geladen reicht (auch offline)
+  if (/^(cdn\.jsdelivr\.net|fonts\.googleapis\.com|fonts\.gstatic\.com)$/.test(url.hostname)) {
+    e.respondWith(caches.open("tagesplan-ext").then((c) => c.match(e.request).then((hit) => hit ?? fetch(e.request).then((res) => { if (res.ok || res.type === "opaque") c.put(e.request, res.clone()); return res; }))));
+    return;
+  }
+  if (url.origin !== location.origin) return;
   // Erst Netz, bei Funkloch der Cache
   // no-cache: immer beim Server nachfragen, ob es eine neuere Datei gibt
   e.respondWith(fetch(e.request.url, { cache: "no-cache", credentials: "same-origin" }).then((res) => {

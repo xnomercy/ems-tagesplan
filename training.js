@@ -952,6 +952,7 @@ export function createTraining(ctx) {
 
   return {
     load, render, start, finish, runVoice, openAnalysis, saveBody,
+    newExercise: () => openExerciseEdit(),
     active, exercises: () => T.exercises, workouts: () => T.workouts,
     figure: figureSvg,
   };

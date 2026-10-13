@@ -597,3 +597,94 @@ body.nav-open .sidenav-list button:nth-child(6) { transition-delay: .15s; } body
 .shop-trips > div { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 8px 0; color: var(--muted); }
 .shop-trips > div + div { border-top: 1px solid var(--line); }
 .shop-trips > div span:first-child { color: var(--text); font-weight: 600; }
+
+/* v27: Offline, Wasser, Ramadan, Koran, Scanner, Fristen, Rückblick */
+.net-pill { flex: none; align-self: center; font-size: 11px; font-weight: 800; padding: 5px 10px; border-radius: 12px; background: #FFF4DE; color: #8A5A00; white-space: nowrap; }
+.card .bar, .rv-prayers .bar { height: 8px; border-radius: 4px; background: var(--soft); overflow: hidden; margin: 8px 0 4px; }
+.card .bar > div, .rv-prayers .bar > div { height: 100%; background: var(--petrol); border-radius: 4px; transition: width .4s; }
+.hint.ok { background: var(--done-bg); color: var(--done-text); }
+
+.water-card { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.water-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.water-info .bar { margin-bottom: 0; }
+.water-card.done .bar > div { background: var(--done); }
+.water-plus { flex: none; min-width: 64px; height: 52px; border: 0; border-radius: 16px; background: var(--petrol); color: #fff; display: flex; align-items: center; justify-content: center; gap: 4px; font-weight: 800; font-size: 15px; }
+.water-plus svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
+.water-minus { flex: none; width: 40px; height: 52px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--card); color: var(--muted); font-size: 22px; font-weight: 700; }
+
+.ramadan-card { margin-top: 14px; background: linear-gradient(140deg, #1F7A8C, #0B3D4A); color: #fff; }
+.ramadan-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; font-size: 14px; }
+.ramadan-top span { opacity: .85; font-weight: 700; }
+.ramadan-times { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
+.ramadan-times div { background: var(--soft); border-radius: 12px; padding: 8px 10px; display: flex; flex-direction: column; }
+.ramadan-card .ramadan-times div { background: rgba(255,255,255,.12); }
+.ramadan-times small { font-size: 11px; font-weight: 700; opacity: .8; text-transform: uppercase; letter-spacing: .06em; }
+.ramadan-times b { font-size: 18px; }
+.ramadan-card .seg { background: rgba(255,255,255,.12); margin: 0; }
+.ramadan-card .seg button { color: rgba(255,255,255,.85); }
+.ramadan-card .seg button.on { background: #fff; color: var(--deep); }
+
+.quran-top { display: flex; justify-content: space-between; align-items: baseline; }
+.quran-top .big { font-size: 30px; font-weight: 800; }
+.quran-add { flex-wrap: wrap; margin-top: 6px; }
+.fast-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 5px; margin-top: 8px; }
+.fast-day { aspect-ratio: 1; border: 1.5px solid var(--line); border-radius: 8px; background: var(--card); font-size: 12px; font-weight: 700; color: var(--muted); padding: 0; }
+.fast-day.ja { background: var(--done); border-color: var(--done); color: #fff; }
+.fast-day.nein { background: #FDECEC; border-color: #F3C7C5; color: #B3261E; }
+.fast-day.nachholen { background: var(--soft); color: var(--petrol); }
+.fast-day.today { outline: 2px solid var(--petrol); outline-offset: 1px; }
+.fast-day:disabled { opacity: .45; }
+
+.shop-scan { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 48px; margin: 10px 0 0; border-radius: 14px; border: 1.5px solid var(--line); background: var(--card); color: var(--text); font-weight: 700; font-size: 15px; }
+.shop-scan svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.scan-box { position: relative; border-radius: 16px; overflow: hidden; background: #000; aspect-ratio: 4 / 3; margin: 6px 0 4px; }
+.scan-box video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scan-frame { position: absolute; left: 12%; right: 12%; top: 32%; bottom: 32%; border: 3px solid var(--tuerkis); border-radius: 12px; box-shadow: 0 0 0 999px rgba(0,0,0,.35); }
+.scan-msg { position: absolute; left: 0; right: 0; bottom: 8px; margin: 0; text-align: center; color: #fff; font-size: 13px; font-weight: 700; }
+.scan-recent { display: flex; flex-direction: column; gap: 6px; }
+.scan-recent button { display: flex; justify-content: space-between; gap: 10px; align-items: center; text-align: left; border: 1.5px solid var(--line); background: var(--card); border-radius: 12px; padding: 10px 12px; color: var(--text); font-weight: 600; }
+.scan-recent .shop-flag.vk-haram { background: #FDECEC; color: #B3261E; }
+.scan-recent button > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scan-head { display: flex; gap: 12px; align-items: center; padding-right: 44px; }
+.scan-head img { width: 64px; height: 64px; object-fit: contain; border-radius: 10px; background: #fff; flex: none; }
+.scan-head h3 { margin: 0; }
+.scan-verdict { margin: 14px 0 8px; padding: 14px; border-radius: 14px; font-size: 18px; font-weight: 800; text-align: center; }
+.scan-verdict.vk-haram { background: #FDECEC; color: #B3261E; }
+.scan-verdict.vk-warn { background: #FFF4DE; color: #8A5A00; }
+.scan-verdict.vk-ok { background: var(--done-bg); color: var(--done-text); }
+.scan-reasons { margin: 0 0 6px; padding-left: 20px; }
+.scan-reasons li { margin: 4px 0; font-weight: 600; }
+.scan-reasons li.vk-haram { color: #B3261E; }
+.scan-reasons li.vk-check { color: #8A5A00; }
+.scan-ing summary { font-weight: 700; color: var(--petrol); margin: 6px 0; }
+.shop-flag.vk-ok { background: var(--done-bg); color: var(--done-text); }
+.shop-flag.vk-warn { background: #FFF4DE; color: #8A5A00; }
+:root[data-theme="dark"] .scan-verdict.vk-haram, :root[data-theme="dark"] .fast-day.nein { background: #3A1515; color: #F5A3A3; border-color: #5A2424; }
+:root[data-theme="dark"] .scan-verdict.vk-warn, :root[data-theme="dark"] .net-pill { background: #3A2E10; color: #F2CC75; }
+
+.dl-card { padding: 4px 0; }
+.dl-row { display: flex; width: 100%; gap: 10px; align-items: center; justify-content: space-between; text-align: left; border: 0; border-bottom: 1px solid var(--line); background: none; padding: 12px 16px; color: var(--text); }
+.dl-row:last-child { border-bottom: 0; }
+.dl-main { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.dl-when { flex: none; font-size: 13px; font-weight: 800; color: var(--muted); }
+.dl-row.soon .dl-when { color: #8A5A00; }
+.dl-row.late .dl-when { color: #B3261E; }
+
+.rv-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 14px 0 12px; text-align: center; }
+.rv-head > div { display: flex; flex-direction: column; }
+.rv-head .round-btn { font-size: 22px; font-weight: 700; }
+.rv-head .round-btn:disabled { opacity: .35; }
+.rv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.rv-tile { background: var(--card); border-radius: var(--radius); padding: 14px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 2px; }
+.rv-tile small { font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.rv-tile b { font-size: 22px; }
+.rv-arrow { font-size: 12px; margin-left: 6px; vertical-align: middle; }
+.rv-arrow.up { color: var(--done); }
+.rv-arrow.down { color: #C2410C; }
+.rv-prayers > div { display: grid; grid-template-columns: 72px 1fr 44px; gap: 10px; align-items: center; font-weight: 700; }
+.rv-prayers .bar { margin: 6px 0; }
+.rv-prayers .small { text-align: right; }
+.rv-tips { margin: 0; padding-left: 20px; }
+.rv-tips li { margin: 6px 0; }
+.steps { padding-left: 22px; margin: 8px 0 4px; }
+.steps li { margin: 8px 0; }

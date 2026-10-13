@@ -1,9 +1,9 @@
 // Nur für ?demo: Daten im Speicher statt Supabase, zum Ausprobieren und Testen.
 const uid = "demo-user";
 const id = () => Math.random().toString(36).slice(2);
-const tables = { settings: [], routines: [], items: [], completions: [], supplies: [], push_subscriptions: [], exercises: [], workouts: [], workout_sessions: [], workout_sets: [], rest_alarms: [], body_metrics: [], shopping_lists: [], shopping_items: [], shopping_trips: [], shopping_list_members: [] };
+const tables = { settings: [], routines: [], items: [], completions: [], supplies: [], push_subscriptions: [], exercises: [], workouts: [], workout_sessions: [], workout_sets: [], rest_alarms: [], body_metrics: [], shopping_lists: [], shopping_items: [], shopping_trips: [], shopping_list_members: [], daily_log: [], deadlines: [] };
 const defaults = {
-  settings: () => ({ user_id: uid, lat: null, lng: null, prayer_method: 13, calendar_token: "demo", nag_minutes: 20 }),
+  settings: () => ({ user_id: uid, lat: null, lng: null, prayer_method: 13, calendar_token: "demo", nag_minutes: 20, ramadan: "auto", water_goal: 12, sleep_hours: 7.5, quran_goal: null }),
   routines: () => ({ id: id(), user_id: uid, category: "sonstiges", prayer: null, at_time: null, anchor_prayer: null, anchor_offset: 15, priority: "normal", days: [1, 2, 3, 4, 5, 6, 7], notes: null, active: true }),
   items: () => ({ id: id(), user_id: uid, repeat: null, series_id: null, done_at: null, created_at: new Date().toISOString(), kind: "aufgabe", priority: "normal", location: null, remind_before: null, checklist: [], area: null, on_date: new Date().toISOString().slice(0, 10), start_time: null, end_time: null, notes: null, done: false }),
   completions: () => ({ user_id: uid }),
@@ -17,6 +17,8 @@ const defaults = {
   shopping_items: () => ({ id: id(), qty: null, category: "sonstiges", store: "supermarkt", note: null, flag: null, done: false, done_at: null, purchased_at: null, trip_id: null, price: null, urgent: false, need_by: null, every_days: null, added_by: uid, created_at: new Date().toISOString() }),
   shopping_trips: () => ({ id: id(), store: null, amount: null, items: 0, finished_at: new Date().toISOString(), by_user: uid }),
   shopping_list_members: () => ({ status: "invited", created_at: new Date().toISOString() }),
+  daily_log: () => ({ user_id: uid, water: 0, fasted: null, quran_pages: 0 }),
+  deadlines: () => ({ id: id(), user_id: uid, kind: "sonstiges", notice_months: null, lead_days: 30, repeat_years: null, notes: null, item_id: null, done: false, created_at: new Date().toISOString() }),
   rest_alarms: () => ({ user_id: uid, created_at: new Date().toISOString() }),
   workout_sets: () => ({ id: id(), user_id: uid, set_no: 1, kg: null, reps: null, duration_sec: null, speed: null, incline: null, rir: null, created_at: new Date().toISOString() }),
 };

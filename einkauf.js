@@ -344,7 +344,8 @@ export function createShopping(ctx) {
     let html = `<form class="shop-add" id="shop-add" autocomplete="off"><input id="shop-in" placeholder="${t("Was fehlt?")}" enterkeyhint="done">
       <button type="button" class="round-btn shop-more" id="shop-more" aria-label="${t("Mit Details anlegen")}"><svg viewBox="0 0 24 24"><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M17.5 3.5a2.1 2.1 0 0 1 3 3L13 14l-4 1 1-4z"/></svg></button>
       <button class="primary" aria-label="${t("Hinzufügen")}">+</button></form>
-      <div class="chips shop-ac" id="shop-ac" hidden></div>`;
+      <div class="chips shop-ac" id="shop-ac" hidden></div>
+      ${ctx.onScan ? `<button type="button" class="btn shop-scan" id="shop-scan"><svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13 8v8M17 8v8"/></svg>${t("Packung scannen")}</button>` : ""}`;
     if (stores.length > 1) html += `<div class="chips shop-stores"><button type="button" class="chip ${S.store === "alle" ? "on" : ""}" data-store="alle">${t("Alle")} ${all.filter((x) => !x.done).length}</button>${stores.map((k) => `<button type="button" class="chip ${S.store === k ? "on" : ""}" data-store="${esc(k)}">${esc(lbl(k))} ${all.filter((x) => x.store === k && !x.done).length}</button>`).join("")}</div>`;
     if (todo.length) html += `<div class="shop-tools"><span class="small muted">${priced ? t("ca. {x}", { x: eur(est) }) + (priced < todo.length ? " · " + t("{n} ohne Preis", { n: todo.length - priced }) : "") : t("{n} Artikel offen", { n: todo.length })}</span>
       <button type="button" class="link-btn" id="shop-plan">${t("Einkauf planen")}</button><button type="button" class="link-btn" id="shop-share">${t("Teilen")}</button></div>`;
@@ -401,6 +402,7 @@ export function createShopping(ctx) {
     host.querySelectorAll("[data-shop-edit]").forEach((b) => (b.onclick = () => openEdit(byId(b.dataset.shopEdit))));
     host.querySelectorAll("[data-sug]").forEach((b) => (b.onclick = async () => { const x = sug.due[Number(b.dataset.sug)]; const r = await add([{ name: x.name, qty: x.qty, store: x.store, price: x.price, every_days: x.every_days }]); if (r.msg) toast(r.msg); }));
     host.querySelectorAll("[data-basic]").forEach((b) => (b.onclick = async () => { const r = await add([{ name: b.dataset.basic }]); if (r.msg) toast(r.msg); }));
+    host.querySelector("#shop-scan")?.addEventListener("click", () => ctx.onScan());
     host.querySelector("#shop-finish")?.addEventListener("click", openFinish);
     host.querySelector("#shop-share")?.addEventListener("click", share);
     host.querySelector("#shop-plan")?.addEventListener("click", openPlan);
@@ -571,6 +573,7 @@ export function createShopping(ctx) {
 
   return {
     load, render, runVoice, add,
+    openNew: () => openEdit({ name: "", qty: null, urgent: false }),
     openCount: () => (S.loaded ? openItems().filter((x) => !x.done) : null),
     names: () => openItems().map((x) => x.name),
     // Für den Tag: was heute/morgen gebraucht wird oder dringend ist

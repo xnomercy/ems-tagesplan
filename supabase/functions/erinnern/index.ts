@@ -16,15 +16,29 @@ const TXT = {
   de: { testT: "Mitteilungen sind an", testB: "So erinnert dich dein Tagesplan.", prayer: (t: string) => `Gebet: ${t}`, prayerB: (t: string, at: string) => `Zeit für ${t} (${at})`,
     open: "Noch nicht abgehakt", termin: (t: string) => `Termin: ${t}`, at: (t: string) => `um ${t}`, still: "Noch offen", tomorrow: "Morgen",
     tasks: (n: number, late: number) => `${n} offene ${n === 1 ? "Aufgabe" : "Aufgaben"}${late ? `, ${late} überfällig` : ""}`, nth: (n: number) => `${n}. Erinnerung`,
-    supT: "Vorrat geht zur Neige", supB: (name: string, d: number) => d <= 0 ? `${name}: leer` : `${name}: noch ${d} ${d === 1 ? "Tag" : "Tage"}` },
+    supT: "Vorrat geht zur Neige", supB: (name: string, d: number) => d <= 0 ? `${name}: leer` : `${name}: noch ${d} ${d === 1 ? "Tag" : "Tage"}`,
+    sahurT: "Sahur", sahurB: (t: string) => `Letzte Mahlzeit bis ${t} (Imsak)`, iftarT: "Iftar", iftarB: (t: string) => `Iftar um ${t}. Guten Appetit!`,
+    reviewT: "Dein Wochenrückblick", reviewB: "Gebete, Training, Supplements und Ausgaben der Woche" },
   tr: { testT: "Bildirimler açık", testB: "Tagesplan sana böyle hatırlatır.", prayer: (t: string) => `Namaz: ${t}`, prayerB: (t: string, at: string) => `${t} vakti (${at})`,
     open: "Henüz işaretlenmedi", termin: (t: string) => `Randevu: ${t}`, at: (t: string) => `saat ${t}`, still: "Hâlâ açık", tomorrow: "Yarın",
     tasks: (n: number, late: number) => `${n} açık görev${late ? `, ${late} gecikmiş` : ""}`, nth: (n: number) => `${n}. hatırlatma`,
-    supT: "Stok azalıyor", supB: (name: string, d: number) => d <= 0 ? `${name}: bitti` : `${name}: ${d} gün kaldı` },
+    supT: "Stok azalıyor", supB: (name: string, d: number) => d <= 0 ? `${name}: bitti` : `${name}: ${d} gün kaldı`,
+    sahurT: "Sahur", sahurB: (t: string) => `Son yemek ${t}'e kadar (imsak)`, iftarT: "İftar", iftarB: (t: string) => `İftar ${t}. Afiyet olsun!`,
+    reviewT: "Haftalık özetin", reviewB: "Haftanın namazları, antrenmanı, takviyeleri ve harcamaları" },
 };
 const PRAYER_TR: Record<string, string> = { fajr: "Sabah", dhuhr: "Öğle", asr: "İkindi", maghrib: "Akşam", isha: "Yatsı" };
 
 const toMin = (t: string) => { const [h, m] = t.slice(0, 5).split(":").map(Number); return h * 60 + m; };
+
+// Ramadan: Supplements, Training und Mahlzeiten aus der Fastenzeit zu Sahur oder nach Iftar (wie in der App)
+function ramadanShift(r: { category: string; title: string; prayer: string | null }, at: number, imsak: number, iftar: number): number | null {
+  if (r.prayer || !["supps", "training", "essen"].includes(r.category)) return null;
+  if (at < imsak - 60 || at >= iftar) return null;
+  const morning = at < 11 * 60 || /frühstück|kahvaltı|morgen|sabah/i.test(r.title);
+  if (r.category === "essen" && !/frühstück|mittag|lunch|kahvaltı|öğle/i.test(r.title)) return null;
+  if (r.category === "training") return iftar + 90;
+  return morning ? imsak - 30 : iftar + 15;
+}
 const fmt = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 
 function berlinNow() {
@@ -80,12 +94,15 @@ Deno.serve(async (req) => {
     if (!pt && settings.lat != null) {
       try {
         const res = await fetch(`https://api.aladhan.com/v1/timings/${now.ddmmyyyy}?latitude=${settings.lat}&longitude=${settings.lng}&method=${settings.prayer_method}`);
-        pt = (await res.json()).data.timings;
+        const j = (await res.json()).data;
+        pt = { ...j.timings, HijriMonth: j.date?.hijri?.month?.number ?? null, HijriDay: Number(j.date?.hijri?.day) || null };
         await db.from("settings").update({ pt_cache: { date: now.date, timings: pt } }).eq("user_id", uid);
       } catch (_) { pt = null; }
     }
     const tomorrow = new Date(Date.parse(now.date) + 864e5).toISOString().slice(0, 10);
     const prayerMin = (p: string) => (pt ? toMin(String(pt[PRAYER_KEY[p]])) : null);
+    const fasting = !!pt && (settings.ramadan === "an" || ((settings.ramadan ?? "auto") === "auto" && Number(pt.HijriMonth) === 9));
+    const imsak = pt ? toMin(String(pt.Imsak ?? pt.Fajr)) : 0, iftar = pt ? toMin(String(pt.Maghrib)) : 0;
 
     const [{ data: routines }, { data: done }, { data: items }, { data: logs }, { data: supplies }] = await Promise.all([
       db.from("routines").select("*").eq("user_id", uid).eq("active", true),
@@ -104,9 +121,19 @@ Deno.serve(async (req) => {
       if (!r.days.includes(now.weekday) || doneSet.has(r.id)) continue;
       let at: number | null = null;
       if (r.prayer) at = prayerMin(r.prayer);
-      else if (r.anchor_prayer) { const b = prayerMin(r.anchor_prayer); at = b == null ? null : b + (r.anchor_offset ?? 15); }
+      else if (r.anchor_prayer) {
+        const b = prayerMin(r.anchor_prayer), off = r.anchor_offset ?? 15;
+        at = b == null ? null : b + off;
+        // Vor dem Gebet (z. B. Schlafenszeit vor Fajr): am Abend, aber nicht vor Isha
+        if (at != null && off < 0) {
+          at = ((at % 1440) + 1440) % 1440;
+          const isha = prayerMin("isha");
+          if (isha != null && at >= 720 && at < isha + 20) at = isha + 20;
+        }
+      }
       else if (r.at_time) at = toMin(r.at_time);
       if (at == null) continue;
+      if (fasting) at = ramadanShift(r, at, imsak, iftar) ?? at;
       let until = Math.min(at + MAX_NAG, END_OF_DAY);
       if (r.prayer) {
         // Ein Gebet nervt nur bis zum nächsten Gebet
@@ -135,6 +162,14 @@ Deno.serve(async (req) => {
           body: open.slice(0, 4).map((i) => i.title).join(" · "), at: slot, until: slot + 60, high: false });
       }
     }
+
+    // Ramadan: Sahur 45 Min. vor Imsak, Iftar zur Maghrib-Zeit
+    if (fasting) {
+      due.push({ key: `s:${now.date}`, title: tx.sahurT, body: tx.sahurB(fmt(imsak)), at: imsak - 45, until: imsak, high: false });
+      due.push({ key: `f:${now.date}`, title: tx.iftarT, body: tx.iftarB(fmt(iftar)), at: iftar - 1, until: iftar + 30, high: false });
+    }
+    // Sonntag 19 Uhr: Wochenrückblick
+    if (now.weekday === 7) due.push({ key: `w:${now.date}`, title: tx.reviewT, body: tx.reviewB, at: 19 * 60, until: 21 * 60, high: false });
 
     // Vorrat: einmal am Tag um 10 Uhr, wenn etwas bald leer ist
     const low = (supplies ?? []).map((x) => {

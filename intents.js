@@ -4,6 +4,7 @@
 import { parseDate, parseTime, findMatch } from "./parser.js";
 import { parseDateTr, parseTimeTr, findPrayer } from "./parser-tr.js";
 import { parseItems, normName } from "./einkauf.js";
+import { parseDeadline } from "./fristen.js";
 
 const B = "(?<![\\p{L}\\d])";
 const E = "(?![\\p{L}\\d])";
@@ -32,6 +33,9 @@ const VIEW_WORDS = [
   ["monat", rx(`monat${W}|monatsansicht|kalenderansicht|bu ay${W}|ay görünüm${W}|aylık görünüm${W}|aylık takvim${W}`)],
   ["verlauf", rx(`verlauf|ich\\s+erledigt|erledigte\\p{L}*|geschafft|historie|geçmiş${W}|tamamlanan${W}|yaptıklarım${W}`)],
   ["vorrat", rx(`vorr(?:a|ä)t${W}|supplement${W}|stok${W}|takviye${W}`)],
+  ["rueckblick", rx(`(?:wochen)?rückblick${W}|wochenbilanz|haftalık özet${W}|haftanın özeti|özet${W}`)],
+  ["fristen", rx(`frist${W}|verträge|vertrag${W}|süre${W}|sözleşme${W}`)],
+  ["glaube", rx(`koran${W}|quran|kuran${W}|kur'an${W}|ramadan${W}|ramazan${W}|fasten${W}|oruç${W}`)],
   ["termine", rx(`termine|aufgaben|kalender|randevu${W}|görev${W}|takvim${W}`)],
   ["plan", rx(`routinen|rutin${W}`)],
   ["einkauf", rx(`einkauf${W}|alışveriş${W}`)],
@@ -113,6 +117,9 @@ export function parseIntent(text, now = new Date(), targets = [], lang = "de", s
 
   const body = bodyIntent(s);
   if (body && !isNew) return body;
+
+  const ex = RE.erinnerung.test(s) ? null : extraIntent(s, now, lang);
+  if (ex) return ex;
 
   const tr = RE.erinnerung.test(s) || isNew ? null : trainingIntent(s, training);
   if (tr) return tr;
@@ -434,3 +441,64 @@ function trainingIntent(s, { exercises = [], workouts = [], running = false } = 
   if (!exercise && !running) return null;
   return { type: "training", action: "log", exercise, kg, reps, sets: sets ?? 1, rir };
 }
+
+// Wasser, Koran, Fasten, Ramadan, Schlaf, Barcode und Fristen
+const NUM = (w) => (w == null ? 1 : /\d/.test(w) ? Number(w.replace(",", ".")) : ZAHL[w.toLowerCase()] ?? 1);
+const NUMW = `(\\d+(?:[.,]\\d+)?|${Object.keys(ZAHL).join("|")})`;
+function extraIntent(s, now, lang) {
+  let m;
+  // Barcode: "scanne Barcode", "ist das halal", "barkod tara"
+  if (rx(`barcode${W}|strichcode${W}|scann${W}|barkod${W}|tara(?:t|yın)?`).test(s) || rx(`ist (?:das|es) halal|helal mi`).test(s)) return { type: "scan" };
+
+  // Wasser: "ein Glas Wasser", "2 Gläser Wasser getrunken", "halber Liter Wasser", "bir bardak su içtim"
+  if (rx(`wasser|su(?:yu)?`).test(s) && !rx(`kauf${W}|einkauf${W}|liste${W}|alışveriş${W}|al(?:dım)?|lazım|bitti|alle`).test(s)) {
+    if (rx(`wie ?viel|ne kadar|kaç`).test(s)) return { type: "wasser", action: "status" };
+    if ((m = s.match(rx(`(halbe?n?|yarım)\\s+(?:liter|litre|l)`)))) return { type: "wasser", action: "add", n: 2 };
+    if ((m = s.match(rx(`${NUMW}\\s*(?:liter|litre|l)`)))) return { type: "wasser", action: "add", n: Math.round(NUM(m[1]) * 4) };
+    if ((m = s.match(rx(`${NUMW}\\s*ml`)))) return { type: "wasser", action: "add", n: Math.max(1, Math.round(NUM(m[1]) / 250)) };
+    if ((m = s.match(rx(`(?:${NUMW}\\s+)?(?:glas${W}|gläser${W}|bardak${W}|flasche${W}|şişe${W})`)))) {
+      const n = NUM(m[1]) * (/flasche|şişe/iu.test(m[0]) ? 2 : 1);
+      return { type: "wasser", action: "add", n: Math.round(n) };
+    }
+    if (rx(`getrunken|trink${W}|içtim|içiyorum`).test(s)) return { type: "wasser", action: "add", n: 1 };
+  }
+
+  // Koran: "Koran 5 Seiten gelesen", "ein Juz gelesen", "Ich bin bei Seite 245", "Koran-Ziel bis 30. März"
+  const quran = rx(`koran${W}|quran|kuran${W}|kur'an${W}`).test(s);
+  if (quran || rx(`juz|cüz${W}`).test(s)) {
+    if ((m = s.match(rx(`${NUMW}\\s*(?:juz|cüz${W})`)))) return { type: "glaube", action: "pages", pages: Math.round(NUM(m[1]) * 20) };
+    if ((m = s.match(rx(`(?:bin|bei|auf|an)\\s+(?:der\\s+)?seite\\s+(\\d{1,3})|seite\\s+(\\d{1,3})\\s+(?:erreicht|angekommen)|(\\d{1,3})\\.?\\s*sayfa(?:day|sında|ya geldim)${W}|sayfa\\s+(\\d{1,3})(?:'?(?:dayım|deyim))`)))) {
+      return { type: "glaube", action: "page", page: Number(m[1] ?? m[2] ?? m[3] ?? m[4]) };
+    }
+    if ((m = s.match(rx(`${NUMW}\\s*(?:seite${W}|sayfa${W})`)))) return { type: "glaube", action: "pages", pages: Math.round(NUM(m[1])) };
+    if (rx(`ziel|hatim|hatm${W}|bitir${W}|kadar|durchlesen|bis`).test(s)) {
+      const d = (lang === "tr" ? parseDateTr : parseDate)(s, now);
+      const d2 = d.hit ? d : (lang === "tr" ? parseDate : parseDateTr)(s, now);
+      if (d2.hit) return { type: "glaube", action: "goal", target: iso(d2.date) };
+    }
+    if (rx(`wie weit|wie viel|stand|status|ne kadar|nerede|kaç sayfa`).test(s)) return { type: "glaube", action: "status" };
+  }
+
+  // Ramadan-Modus
+  if (rx(`ramadan${W}|ramazan${W}`).test(s) && rx(`modus|mod${W}`).test(s)) {
+    if (rx(`aus${W}|kapat${W}|deaktiv${W}`).test(s)) return { type: "glaube", action: "ramadan", mode: "aus" };
+    if (rx(`auto${W}|otomatik${W}`).test(s)) return { type: "glaube", action: "ramadan", mode: "auto" };
+    if (rx(`an|ein${W}|aktiv${W}|aç${W}`).test(s)) return { type: "glaube", action: "ramadan", mode: "an" };
+  }
+  // Fasten: "heute gefastet", "nicht gefastet", "Fasten nachgeholt", "oruç tuttum", "oruç tutmadım", "kaza orucu tuttum"
+  if (rx(`gefastet|faste${W}|fasten${W}|oruç${W}|oruc${W}`).test(s) && !rx(`zeig${W}|öffne${W}|göster${W}|aç`).test(s)) {
+    if (rx(`nachgeholt|nachholen|kaza${W}`).test(s)) return { type: "glaube", action: "fast", value: "nachholen" };
+    if (rx(`nicht|kein${W}|tutmadım|tutamadım|tutmuyorum`).test(s)) return { type: "glaube", action: "fast", value: "nein" };
+    if (rx(`gefastet|faste|tuttum|oruçluyum|tutuyorum`).test(s)) return { type: "glaube", action: "fast", value: "ja" };
+  }
+
+  // Schlaf: "Wann soll ich schlafen", "Schlafziel 8 Stunden", "ne zaman yatmalıyım", "uyku hedefi 8 saat"
+  if ((m = s.match(rx(`(?:schlafziel|uyku hedefi|schlaf(?:en)?\\s+(?:ziel|dauer))\\s*(?:auf\\s*)?(\\d{1,2}(?:[.,]5)?)`)))) return { type: "schlaf", action: "set", hours: Number(m[1].replace(",", ".")) };
+  if (rx(`wann (?:soll|muss|sollte) ich (?:schlafen|ins bett)|schlafenszeit|ne zaman yat${W}|uyku saati|yatma saati`).test(s)) return { type: "schlaf", action: "status" };
+
+  // Fristen: "TÜV am 12.3.2027", "Handyvertrag endet 1.8.2027, 3 Monate Kündigungsfrist", "kimlik 5.6.2029'da bitiyor"
+  const fr = parseDeadline(s, now, lang === "tr" ? parseDateTr : parseDate) ?? parseDeadline(s, now, lang === "tr" ? parseDate : parseDateTr);
+  if (fr) return fr;
+  return null;
+}
+const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;

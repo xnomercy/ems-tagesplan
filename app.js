@@ -4,15 +4,24 @@ import { parseIntent, extractPrio, extractRepeat } from "./intents.js";
 import { t, LANG, LOCALE, setLang, translateStatic } from "./i18n.js";
 import { createTraining } from "./training.js";
 import { createShopping, STORES } from "./einkauf.js";
+import { withOffline } from "./offline.js";
+import { createDayLog } from "./daylog.js";
+import { createScanner } from "./halal-scan.js";
+import { createGlaube, ramadanActive, ramadanShift } from "./glaube.js";
+import { createWellness, sleepOffset } from "./wellness.js";
+import { createDeadlines } from "./fristen.js";
+import { createReview } from "./rueckblick.js";
 
 const SUPABASE_URL = "https://hpxdhtuabzqwyslzcmbt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kKiQdntJd893YvBPFx7fhw_FYzlwwtz";
 const DEMO = new URLSearchParams(location.search).has("demo");
 // Bei jeder Veröffentlichung zusammen mit version.json und dem Cache-Namen in sw.js hochzählen
-const APP_VERSION = "26";
-const db = DEMO
+const APP_VERSION = "27";
+const rawDb = DEMO
   ? (await import("./mock.js")).db
   : (await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm")).createClient(SUPABASE_URL, SUPABASE_KEY);
+// Ohne Netz: Änderungen warten in einer Schlange und gehen raus, sobald wieder Netz da ist
+const db = withOffline(rawDb, { onChange: (n, res) => onOutbox(n, res) });
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -23,7 +32,7 @@ const fmtDay = (iso, opts = { weekday: "short", day: "numeric", month: "short" }
 const DAY_KEYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const DAY_SHORT = new Proxy([], { get: (_, k) => (k === "map" ? (fn) => DAY_KEYS.map((d, i) => fn(t(d), i)) : k in DAY_KEYS && /^\d+$/.test(k) ? t(DAY_KEYS[k]) : DAY_KEYS[k]) });
 const L = (obj) => new Proxy(obj, { get: (o, k) => (typeof o[k] === "string" ? t(o[k]) : o[k]) });
-const CATEGORIES = L({ gebet: "Gebet", lesen: "Lesen", training: "Training", supps: "Supplements", pflege: "Pflege", essen: "Essen", sonstiges: "Sonstiges" });
+const CATEGORIES = L({ gebet: "Gebet", lesen: "Lesen", training: "Training", supps: "Supplements", pflege: "Pflege", essen: "Essen", schlaf: "Schlaf", sonstiges: "Sonstiges" });
 const AREAS = L({ arbeit: "Arbeit", privat: "Privat", gesundheit: "Gesundheit", familie: "Familie", finanzen: "Finanzen", haushalt: "Haushalt" });
 const VAPID_PUBLIC = "BNV7U2HOxe9fvDt3Ni1eyeGrlVFLT5stsCgcKnU3pF9Ajqu5OWhv0b6qoLrtdcpFtH3J_3gK9CMu4uFbiAbKCk8";
 const PRAYER_API = { fajr: "Fajr", dhuhr: "Dhuhr", asr: "Asr", maghrib: "Maghrib", isha: "Isha" };
@@ -117,16 +126,18 @@ async function ensureSetup() {
 // ---------- Daten ----------
 async function prayerTimes(date) {
   const s = state.settings;
-  if (DEMO) return { Fajr: "05:58", Dhuhr: "13:21", Asr: "16:19", Maghrib: "18:41", Isha: "20:13" };
+  if (DEMO) return { Imsak: "05:48", Fajr: "05:58", Dhuhr: "13:21", Asr: "16:19", Maghrib: "18:41", Isha: "20:13", HijriMonth: new URLSearchParams(location.search).has("ramadan") ? 9 : 4, HijriDay: 12 };
   if (!s || s.lat == null) return null;
-  const key = `pt:${isoDate(date)}:${s.lat.toFixed(2)}:${s.lng.toFixed(2)}:${s.prayer_method}`;
+  const key = `pt2:${isoDate(date)}:${s.lat.toFixed(2)}:${s.lng.toFixed(2)}:${s.prayer_method}`;
   try { const c = localStorage.getItem(key); if (c) return JSON.parse(c); } catch {}
   try {
     const d = `${String(date.getDate()).padStart(2, "0")}-${String(date.getMonth() + 1).padStart(2, "0")}-${date.getFullYear()}`;
     const res = await fetch(`https://api.aladhan.com/v1/timings/${d}?latitude=${s.lat}&longitude=${s.lng}&method=${s.prayer_method}`);
-    const t = (await res.json()).data.timings;
-    try { localStorage.setItem(key, JSON.stringify(t)); } catch {}
-    return t;
+    const j = (await res.json()).data;
+    // Hidschri-Monat mitmerken: 9 = Ramadan
+    const tm = { ...j.timings, HijriMonth: j.date?.hijri?.month?.number ?? null, HijriDay: Number(j.date?.hijri?.day) || null };
+    try { localStorage.setItem(key, JSON.stringify(tm)); } catch {}
+    return tm;
   } catch { return null; }
 }
 
@@ -140,7 +151,9 @@ async function advanceSeries(force = false) {
 
 async function refresh() {
   // Einkaufsliste einmal im Hintergrund laden (für den Hinweis am Einkaufstag und die Sprachbefehle)
-  if (!state.shopLoading) state.shopLoading = shopping.load().then(() => { if (state.view === "heute" && state.entries) renderDay(); });
+  if (!state.shopLoading) state.shopLoading = shopping.load().then(() => { state.shopLoaded = true; autoSupplies(); if (state.view === "heute" && state.entries) renderDay(); });
+  if (!state.glaubeLoading) state.glaubeLoading = glaube.load();
+  if (!state.dlLoading) state.dlLoading = deadlines.load().then(updateNav);
   const day = isoDate(state.day);
   const today = isoDate(new Date());
   await advanceSeries();
@@ -153,6 +166,8 @@ async function refresh() {
     db.from("items").select("*").eq("kind", "aufgabe").eq("done", false)
       .gte("on_date", isoDate(addDays(new Date(), -60))).lte("on_date", isoDate(addDays(new Date(), 14))).order("on_date"),
     db.from("supplies").select("*").order("name"),
+    daylog.load(day, day),
+    state.glaubeLoading,
   ]);
   if (r.error) { toast(t("Laden fehlgeschlagen: {x}", { x: r.error.message })); return; }
   state.routines = r.data;
@@ -160,12 +175,16 @@ async function refresh() {
   state.supplies = sup.data ?? [];
   const done = new Set((c.data ?? []).map((x) => x.routine_id));
   const wd = weekday(state.day);
+  // Im Ramadan rutschen Supplements, Training und Mahlzeiten aus der Fastenzeit
+  const fasting = ramadanActive(state.settings, pt);
 
   const entries = [];
   for (const rt of state.routines) {
     if (!rt.active || !rt.days.includes(wd)) continue;
-    const time = routineTime(rt, pt);
-    entries.push({ kind: "routine", id: rt.id, title: rt.title, time, done: done.has(rt.id), category: rt.category, notes: rt.notes, prayer: rt.prayer, priority: rt.priority, raw: rt });
+    let time = routineTime(rt, pt), moved = null;
+    const shifted = fasting ? ramadanShift(rt, time, pt) : null;
+    if (shifted) { moved = time; time = shifted; }
+    entries.push({ kind: "routine", id: rt.id, title: rt.title, time, moved, done: done.has(rt.id), category: rt.category, notes: rt.notes, prayer: rt.prayer, priority: rt.priority, raw: rt });
   }
   for (const it of i.data ?? []) {
     entries.push({ kind: it.kind, id: it.id, title: it.title, time: hhmm(it.start_time) || null, end: hhmm(it.end_time), done: it.done, notes: it.notes, raw: it, on_date: it.on_date, priority: it.priority, location: it.location });
@@ -176,6 +195,8 @@ async function refresh() {
     ? (open.data ?? []).filter((x) => x.on_date !== day).map((it) => ({ kind: "aufgabe", id: it.id, title: it.title, time: hhmm(it.start_time) || null, done: false, notes: it.notes, raw: it, on_date: it.on_date, priority: it.priority, location: it.location }))
     : [];
   render();
+  ensureSleepRoutine();
+  if (state.shopLoaded) autoSupplies();
 }
 
 // Uhrzeit einer Routine: Gebetszeit, an ein Gebet gekoppelt oder fest
@@ -185,12 +206,19 @@ function routineTime(rt, pt) {
   if (rt.anchor_prayer) {
     if (!pt) return null;
     const [h, m] = pt[PRAYER_API[rt.anchor_prayer]].slice(0, 5).split(":").map(Number);
-    const t = Math.min(h * 60 + m + (rt.anchor_offset ?? 15), 23 * 60 + 59);
+    const off = rt.anchor_offset ?? 15;
+    let t = h * 60 + m + off;
+    if (off < 0) {
+      // Vor dem Gebet, z. B. Schlafenszeit vor Fajr: am Vorabend, aber nicht vor Isha
+      t = ((t % 1440) + 1440) % 1440;
+      const [ih, im] = (pt.Isha ?? "00:00").slice(0, 5).split(":").map(Number);
+      if (pt.Isha && t >= 720 && t < ih * 60 + im + 20) t = ih * 60 + im + 20;
+    } else t = Math.min(t, 23 * 60 + 59);
     return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
   }
   return hhmm(rt.at_time) || null;
 }
-const routineWhen = (r) => r.prayer ? t("auto") : r.anchor_prayer ? `${PRAYER_NAMES[r.anchor_prayer]} +${r.anchor_offset}` : hhmm(r.at_time) || "–";
+const routineWhen = (r) => r.prayer ? t("auto") : r.anchor_prayer ? `${PRAYER_NAMES[r.anchor_prayer]} ${r.anchor_offset < 0 ? "−" + Math.abs(r.anchor_offset) : "+" + r.anchor_offset}` : hhmm(r.at_time) || "–";
 
 // ---------- Anzeige ----------
 function render() {
@@ -200,7 +228,9 @@ function render() {
   // Kopf: am Tag die Begrüßung, sonst der Seitenname
   if (state.view !== "heute") $("#greeting").textContent = t(PAGES[state.view]?.label ?? "");
   ({ heute: renderDay, plan: renderPlan, termine: renderTermine, mehr: renderMehr, vorrat: renderVorrat,
-    training: () => training.render($("#view-training")), einkauf: () => shopping.render($("#view-einkauf")) })[state.view]();
+    training: () => training.render($("#view-training")), einkauf: () => shopping.render($("#view-einkauf")),
+    glaube: () => glaube.render($("#view-glaube")), fristen: () => deadlines.load().then(() => deadlines.render($("#view-fristen"))),
+    rueckblick: () => review.render($("#view-rueckblick")) })[state.view]();
   updateNav();
 }
 
@@ -212,6 +242,7 @@ function itemHtml(e, { next = false, showTime = false } = {}) {
     badge = e.on_date < today ? `<span class="badge late">${t("überfällig")}</span>` : `<span class="badge">${t("bis {d}", { d: fmtDay(e.on_date, { weekday: "short" }) })}</span>`;
   }
   if (e.priority === "hoch") badge += `<span class="badge prio">${t("Wichtig")}</span>`;
+  if (e.moved) badge += `<span class="badge">${t("Ramadan, sonst {t}", { t: e.moved })}</span>`;
   if (e.kind !== "routine" && e.raw?.repeat) badge += `<span class="badge">↻ ${t(REPEATS[e.raw.repeat])}</span>`;
   const cl = e.raw?.checklist ?? [];
   if (e.kind !== "routine" && cl.length) badge += `<span class="badge">${cl.filter((c) => c.d).length}/${cl.length}</span>`;
@@ -258,6 +289,16 @@ function renderDay() {
     <div class="meta"><span>${t("Fortschritt")}</span><span>${done} / ${total} · ${pct}%</span></div>
   </section>`;
   html += dayStrip();
+  if (isToday) {
+    if (db.pending()) html += `<div class="hint">${t("Offline: {n} Änderungen warten aufs Netz", { n: db.pending() })}</div>`;
+    html += glaube.dayCard();
+    html += wellness.waterCard();
+    html += glaube.dayHint();
+    html += wellness.sleepHint();
+    // Sonntag ab Mittag und Montagvormittag: Wochenrückblick anbieten
+    const h = new Date().getHours(), wdT = weekday(new Date());
+    if ((wdT === 7 && h >= 12) || (wdT === 1 && h < 12)) html += `<div class="hint">${t("Dein Wochenrückblick ist da")} <button data-goto="rueckblick">${t("Ansehen")}</button></div>`;
+  }
   const run = training.active();
   if (run) html += `<div class="hint">${t("Training läuft: {x}", { x: esc(run.name ?? "") })} <button data-open-training>${t("Weiter")}</button></div>`;
   // Einkaufstag (Routine/Termin mit "Einkauf") oder Einkauf ist heute geplant: offene Artikel zeigen
@@ -288,6 +329,7 @@ function renderDay() {
   }
   if (!total && !state.open.length) html += `<div class="empty">${t("Tippe unten aufs Mikro und sag, was ansteht.")}</div>`;
   $("#view-heute").innerHTML = html;
+  wellness.bind($("#view-heute"));
   const sel = $("#days .sel");
   if (sel) sel.scrollIntoView({ inline: "center", block: "nearest" });
 }
@@ -516,8 +558,21 @@ function renderMehr() {
       <button class="btn ${lockId() ? "" : "fill"}" id="lock-toggle">${t(lockId() ? "App-Sperre ausschalten" : "Mit Face ID sperren")}</button>
     </div>
     <div class="card">
+      <p class="eyebrow">${t("Wasser und Schlaf")}</p>
+      <label class="small muted" style="display:block">${t("Wasser pro Tag")}</label>
+      <form><select id="water-goal">${[8, 10, 12, 14, 16].map((n) => `<option value="${n}" ${(s.water_goal ?? 12) === n ? "selected" : ""}>${t("{n} Gläser ({l} l)", { n, l: wellness.liters(n) })}</option>`).join("")}</select></form>
+      <label class="small muted" style="display:block;margin-top:12px">${t("Schlafziel")}</label>
+      <form><select id="sleep-h">${[6, 6.5, 7, 7.5, 8, 8.5, 9].map((n) => `<option value="${n}" ${Number(s.sleep_hours ?? 7.5) === n ? "selected" : ""}>${t("{n} Std.", { n: n.toLocaleString(LOCALE()) })}</option>`).join("")}</select></form>
+      <p class="small muted">${t("Die Schlafenszeit richtet sich nach Fajr: 15 Minuten vorher aufstehen, frühestens nach Isha ins Bett.")}</p>
+    </div>
+    <div class="card">
+      <p class="eyebrow">${t("Homescreen-Widget")}</p>
+      <p class="small">${t("Nächstes Gebet und nächste Aufgabe auf dem Homescreen, über die kostenlose App Scriptable.")}</p>
+      <button class="btn fill" id="widget-setup">${t("Widget einrichten")}</button>
+    </div>
+    <div class="card">
       <p class="eyebrow">${t("Deine Daten")}</p>
-      <p class="small">${t("Alle Routinen, Termine, Aufgaben, Erledigt-Häkchen und den Vorrat als Datei sichern.")}</p>
+      <p class="small">${t("Alles als Datei sichern: Routinen, Termine, Training, Körperwerte, Einkäufe, Fristen und Tageswerte.")}</p>
       <button class="btn" id="export">${t("Daten exportieren")}</button>
     </div>
     <div class="card"><p class="small muted">${t("Angemeldet als {x}", { x: esc(state.user?.email) })}</p><button class="btn danger" id="logout">${t("Abmelden")}</button></div>`;
@@ -546,6 +601,9 @@ function renderMehr() {
   document.querySelectorAll("#lang-seg button").forEach((b) => (b.onclick = () => { setLang(b.dataset.lang); $("#view-termine").innerHTML = ""; render(); saveSettings({ lang: LANG }); }));
   $("#lock-toggle").onclick = toggleLock;
   $("#export").onclick = exportData;
+  $("#water-goal").onchange = (e) => saveSettings({ water_goal: Number(e.target.value) });
+  $("#sleep-h").onchange = async (e) => { await saveSettings({ sleep_hours: Number(e.target.value) }); await updateSleepRoutine(); const p = wellness.sleep(); if (p) toast(t("Schlafenszeit {b}, aufstehen {w} vor Fajr", { b: p.bed, w: p.wake })); };
+  $("#widget-setup").onclick = openWidgetSetup;
 }
 
 // ---------- Supplement-Vorrat ----------
@@ -662,7 +720,7 @@ async function sendTestPush() {
 async function saveSettings(patch) {
   const { data, error } = await db.from("settings").update(patch).eq("user_id", state.user.id).select().single();
   if (error) return toast(error.message);
-  state.settings = data;
+  state.settings = data ?? { ...state.settings, ...patch };
   await refresh();
 }
 
@@ -724,7 +782,11 @@ document.addEventListener("click", async (ev) => {
   else if (t.id === "new-item") openItemSheet();
 });
 
-$("#add").onclick = () => openItemSheet();
+// Plus oben legt je nach Seite das Passende an
+$("#add").onclick = () => ({
+  einkauf: () => shopping.openNew(), training: () => training.newExercise(), vorrat: () => openSupplySheet(), plan: () => openRoutineSheet(),
+  glaube: () => glaube.openAdd(), fristen: () => deadlines.openEdit(),
+}[state.view] ?? (() => openItemSheet()))();
 $("#greeting").onclick = () => { state.day = new Date(); switchView("heute"); };
 
 document.querySelectorAll(".tabs > button").forEach((b) => (b.onclick = () => switchView(b.dataset.view)));
@@ -737,16 +799,21 @@ const ICON = {
   training: '<path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/>',
   einkauf: '<path d="M3 4h2.5l2.2 11.2a1.5 1.5 0 0 0 1.5 1.3h8.6a1.5 1.5 0 0 0 1.5-1.2L21 8H6.3"/><circle cx="9.5" cy="20" r="1.3"/><circle cx="17.5" cy="20" r="1.3"/>',
   vorrat: '<rect x="7" y="3" width="10" height="4" rx="1"/><path d="M8 7h8v12a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2z"/><path d="M8 12h8"/>',
+  glaube: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/><path d="M14.5 7.2a3 3 0 1 0 0 5.6 3.6 3.6 0 1 1 0-5.6z"/>',
+  fristen: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4"/><path d="M14 3v5h5M19 8v2"/><circle cx="17" cy="17" r="4"/><path d="M17 15.5V17l1 1"/>',
+  rueckblick: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   mehr: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
 };
 const PAGES = {
   heute: { label: "Tag" }, termine: { label: "Termine" }, plan: { label: "Routinen" }, training: { label: "Training" },
-  einkauf: { label: "Einkauf" }, vorrat: { label: "Supplement-Vorrat" }, mehr: { label: "Einstellungen" },
+  einkauf: { label: "Einkauf" }, vorrat: { label: "Supplement-Vorrat" }, glaube: { label: "Koran & Ramadan" }, fristen: { label: "Fristen & Verträge" },
+  rueckblick: { label: "Wochenrückblick" }, mehr: { label: "Einstellungen" },
 };
 function navCount(k) {
   if (k === "einkauf") return shopping.openCount()?.length || "";
   if (k === "vorrat") return lowSupplies().length || "";
   if (k === "training") return training.active() ? "●" : "";
+  if (k === "fristen") return deadlines.list().filter((d) => !d.done && d.item_id && remindSoon(d)).length || "";
   return "";
 }
 function updateNav() {
@@ -1121,14 +1188,119 @@ const shopping = createShopping({
   lowSupplies: () => lowSupplies(), supplyDays: (x) => supplyDays(x),
   onChange: () => { if (state.view === "heute") renderDay(); },
   onPlanned: () => { state.upcoming = null; refresh(); },
+  onScan: () => scanner.open(),
 });
+
+// ---------- Tageswerte, Koran, Ramadan, Wasser, Schlaf, Fristen, Rückblick, Scanner ----------
+const daylog = createDayLog(db);
+const common = { db, t, esc, $, toast, openSheet, closeSheet, sheet, form, fmtDay, LOCALE, enhancePickers: (f) => enhancePickers(f), today: () => isoDate(new Date()), onChange: () => render() };
+const glaube = createGlaube({ ...common, daylog, settings: () => state.settings, saveSettings, getPt: () => state.pt });
+const wellness = createWellness({ ...common, daylog, settings: () => state.settings, getPt: () => state.pt });
+const deadlines = createDeadlines({ ...common, onChange: () => { state.upcoming = null; refresh(); } });
+const review = createReview({ ...common, daylog, routines: () => state.routines, settings: () => state.settings, budget: () => null });
+const scanner = createScanner({ ...common, DEMO, onAdd: async (name, res) => {
+  const r = await shopping.add([{ name, note: res.verdict === "pruefen" ? t("Zutaten prüfen") : null }]);
+  render();
+  return r;
+} });
+const remindSoon = (d) => { const days = Math.round((Date.parse(d.due_date + "T12:00") - Date.now()) / 864e5); return days - (d.notice_months ?? 0) * 30 <= (d.lead_days ?? 30); };
+document.addEventListener("click", async (ev) => {
+  const f = ev.target.closest("[data-fast]");
+  if (f) { const r = await glaube.setFast(f.dataset.fast); toast(r.msg, r.undo); render(); return; }
+  if (ev.target.closest("[data-quran-add]")) glaube.openAdd();
+});
+
+// Schlafenszeit als Routine, an Fajr gekoppelt (einmalig anlegen; gelöscht bleibt gelöscht)
+async function ensureSleepRoutine() {
+  const key = "tagesplan-sleep-v1";
+  try { if (localStorage.getItem(key)) return; localStorage.setItem(key, "1"); } catch { return; }
+  if (state.routines.some((r) => r.anchor_prayer === "fajr" && (r.anchor_offset ?? 0) < 0)) return;
+  await db.from("routines").insert({ title: "Schlafen gehen", category: "schlaf", anchor_prayer: "fajr", anchor_offset: sleepOffset(Number(state.settings?.sleep_hours ?? 7.5)),
+    days: [1, 2, 3, 4, 5, 6, 7], prayer: null, at_time: null, notes: "Handy weg, Licht aus. So kommst du ausgeschlafen zu Fajr." });
+  refresh();
+}
+async function updateSleepRoutine() {
+  const r = state.routines.find((x) => x.anchor_prayer === "fajr" && (x.anchor_offset ?? 0) < 0);
+  if (r) await db.from("routines").update({ anchor_offset: sleepOffset(Number(state.settings?.sleep_hours ?? 7.5)) }).eq("id", r.id);
+  await refresh();
+}
+
+// Knappe Supplements landen von selbst auf der Einkaufsliste (einmal pro Zählung)
+let autoBusy = false;
+async function autoSupplies() {
+  if (autoBusy || !state.shopLoaded || !state.supplies) return;
+  autoBusy = true;
+  try {
+    const have = new Set((shopping.names() ?? []).map((n) => n.toLowerCase()));
+    for (const x of lowSupplies()) {
+      const key = `tagesplan-supauto:${x.id}`;
+      let mark = null;
+      try { mark = localStorage.getItem(key); } catch {}
+      if (mark === x.counted_on) continue;
+      try { localStorage.setItem(key, x.counted_on); } catch {}
+      if (have.has(x.name.toLowerCase())) continue;
+      const d = supplyDays(x);
+      await shopping.add([{ name: x.name, store: "Online", category: "gesundheit", urgent: d <= 2, note: d <= 0 ? t("Vorrat leer") : t("Vorrat reicht noch {n} Tage", { n: d }) }]);
+      toast(t("{x} wird knapp und steht jetzt auf der Einkaufsliste", { x: x.name }));
+    }
+  } finally { autoBusy = false; }
+}
+
+// Offline-Anzeige
+function onOutbox(n, res) {
+  updateNet();
+  if (res?.sent) { toast(t("{n} Änderungen nachgeschickt", { n: res.sent })); refresh(); }
+  if (res?.failed) toast(t("{n} Änderungen konnten nicht gespeichert werden", { n: res.failed }));
+}
+function updateNet() {
+  const el = $("#net");
+  if (!el) return;
+  const off = !db.isOnline(), n = db.pending();
+  el.hidden = !off && !n;
+  el.textContent = off ? (n ? t("Offline · {n} warten", { n }) : t("Offline")) : t("Sende {n} …", { n });
+}
+addEventListener("online", () => { updateNet(); db.sync(); });
+addEventListener("offline", updateNet);
 
 // ---------- Sprache ----------
 const voice = $("#voice");
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, silenceTimer = null;
 
+// Drei Beispiele passend zur Seite
+const EXAMPLES = {
+  heute: ["Termin morgen um 15 Uhr Zahnarzt", "Asr erledigt", "Ein Glas Wasser", "Koran 5 Seiten gelesen"],
+  termine: ["Termin am 20.10. um 14 Uhr Zahnarzt", "Aufgabe Steuer bis Freitag, wichtig", "Verschiebe Zahnarzt auf Freitag um 10"],
+  plan: ["Täglich um 21 Uhr Buch lesen", "Pausiere Retinol", "Teile die Routinen nach Tageszeit auf"],
+  training: ["Starte Training", "Latziehen 50 kg 12 Wiederholungen", "Gewicht 99,5"],
+  einkauf: ["Milch, 6 Eier und 500 g Hack auf die Einkaufsliste", "Milch gekauft", "Scanne Barcode"],
+  vorrat: ["Magnesium aufgefüllt 60", "Wie lange reicht Magnesium", "Noch 40 Ashwagandha"],
+  glaube: ["Koran 5 Seiten gelesen", "Koran-Ziel bis 30. März", "Heute gefastet"],
+  fristen: ["TÜV am 12.3.2027", "Handyvertrag endet am 1.8.2027 Kündigungsfrist 3 Monate", "Personalausweis läuft am 5.6.2029 ab"],
+  rueckblick: ["Zeig den Wochenrückblick", "Wann soll ich schlafen", "2 Gläser Wasser"],
+  mehr: ["Sprich Türkisch", "Dunkler Modus", "Schlafziel 8 Stunden"],
+};
+const EXAMPLES_TR = {
+  heute: ["Yarın saat 15'te diş doktoru randevusu", "İkindiyi kıldım", "Bir bardak su içtim", "Kuran 5 sayfa okudum"],
+  termine: ["Yarın saat 15'te diş doktoru randevusu", "Vergi görevi cumaya kadar, önemli", "Diş doktorunu cumaya ertele"],
+  plan: ["Her gün saat 21'de kitap oku", "Retinol'ü durdur", "Rutinleri vakte göre sırala"],
+  training: ["Antrenmana başla", "Lat çekme 50 kilo 12 tekrar", "Kilom 99,5"],
+  einkauf: ["Alışveriş listesine süt ve yumurta ekle", "Süt aldım", "Barkod tara"],
+  vorrat: ["Magnezyum doldurdum 60", "Magnezyum ne kadar yeter", "40 tane ashwagandha kaldı"],
+  glaube: ["Kuran 5 sayfa okudum", "Kuran hatmi 30 mart'a kadar", "Oruç tuttum"],
+  fristen: ["Muayene 12.3.2027", "Telefon sözleşmesi 1.8.2027 fesih süresi 3 ay", "Kimlik 5.6.2029'da bitiyor"],
+  rueckblick: ["Haftalık özeti göster", "Ne zaman yatmalıyım", "2 bardak su"],
+  mehr: ["Almancaya geç", "Koyu mod", "Uyku hedefi 8 saat"],
+};
+function fillExamples() {
+  const list = (LANG === "tr" ? EXAMPLES_TR : EXAMPLES)[state.view] ?? EXAMPLES.heute;
+  const box = voice.querySelector(".examples");
+  box.innerHTML = list.map((x) => `<button type="button">${esc(LANG === "tr" ? x : t(x))}</button>`).join("");
+  box.querySelectorAll("button").forEach((b) => (b.onclick = () => { $("#cmd-input").value = b.textContent; showPreview(); }));
+}
+
 $("#mic").onclick = () => {
+  fillExamples();
   loadUpcoming();
   $("#cmd-input").value = "";
   $("#preview").hidden = true;
@@ -1224,8 +1396,20 @@ function describe(cmd) {
   if (cmd.type === "sprache") return [t("Sprache"), cmd.lang === "tr" ? "Türkçe" : "Deutsch"];
   if (cmd.type === "theme") return [t("Darstellung"), t({ auto: "Automatisch", light: "Hell", dark: "Dunkel" }[cmd.theme])];
   if (cmd.type === "gruppe") return [t("Routinen"), t(cmd.g === "zeit" ? "Nach Tageszeit" : "Nach Bereich")];
-  if (cmd.type === "zeige") return [t("Anzeigen"), cmd.date ? fmtDay(cmd.date, { weekday: "long", day: "numeric", month: "long" }) : t({ heute: "Tag", termine: "Termine", plan: "Routinen", mehr: "Einstellungen", monat: "Monat", verlauf: "Verlauf", vorrat: "Supplement-Vorrat", training: "Training", einkauf: "Einkaufsliste" }[cmd.view])];
+  if (cmd.type === "zeige") return [t("Anzeigen"), cmd.date ? fmtDay(cmd.date, { weekday: "long", day: "numeric", month: "long" }) : t({ heute: "Tag", termine: "Termine", plan: "Routinen", mehr: "Einstellungen", monat: "Monat", verlauf: "Verlauf", vorrat: "Supplement-Vorrat", training: "Training", einkauf: "Einkaufsliste", glaube: "Koran & Ramadan", fristen: "Fristen & Verträge", rueckblick: "Wochenrückblick" }[cmd.view])];
   if (cmd.type === "suche") return [t("Suche"), cmd.q];
+  if (cmd.type === "wasser") return [t("Wasser"), cmd.action === "status" ? t("Stand anzeigen") : t("+{n} Gläser ({l} l)", { n: cmd.n, l: wellness.liters(cmd.n) })];
+  if (cmd.type === "scan") return [t("Packung scannen"), t("Halal-Prüfung")];
+  if (cmd.type === "schlaf") return [t("Schlaf"), cmd.action === "set" ? t("Ziel {n} Std.", { n: cmd.hours }) : t("Schlafenszeit anzeigen")];
+  if (cmd.type === "frist") return [t("Frist"), `${cmd.title} · ${fmtDay(cmd.due, { day: "numeric", month: "short", year: "numeric" })}${cmd.notice ? " · " + t("{n} Monate Kündigungsfrist", { n: cmd.notice }) : ""}`];
+  if (cmd.type === "glaube") {
+    if (cmd.action === "pages") return [t("Koran"), t("+{n} Seiten", { n: cmd.pages })];
+    if (cmd.action === "page") return [t("Koran"), t("Seite {p}", { p: cmd.page })];
+    if (cmd.action === "goal") return [t("Koran-Ziel"), fmtDay(cmd.target, { day: "numeric", month: "long", year: "numeric" })];
+    if (cmd.action === "status") return [t("Koran"), t("Stand anzeigen")];
+    if (cmd.action === "fast") return [t("Fasten"), t({ ja: "Gefastet", nein: "Nicht gefastet", nachholen: "Nachgeholt" }[cmd.value])];
+    if (cmd.action === "ramadan") return [t("Ramadan-Modus"), t({ an: "An", aus: "Aus", auto: "Automatisch" }[cmd.mode])];
+  }
   if (cmd.type === "einkauf") {
     const names = (cmd.items ?? []).map((x) => x.name + (x.qty ? ` (${x.qty})` : "")).join(", ");
     if (cmd.action === "show") return [t("Anzeigen"), t("Einkaufsliste")];
@@ -1369,6 +1553,32 @@ async function runIntent(c) {
       const r = await shopping.runVoice(c);
       if (r?.msg) toast(r.msg, r.undo ? async () => { await r.undo(); render(); } : null);
       return;
+    }
+    case "wasser": {
+      if (c.action === "status") { const n = daylog.get(isoDate(new Date())).water ?? 0; return toast(t("Wasser: {n} von {g} Gläsern ({l} l)", { n, g: wellness.goal(), l: wellness.liters(n) })); }
+      const r = await wellness.addWater(c.n);
+      toast(r.msg, async () => { await r.undo(); render(); });
+      return render();
+    }
+    case "glaube": {
+      const r = await glaube.runVoice(c);
+      if (r?.msg) toast(r.msg, r.undo ? async () => { await r.undo(); render(); } : null);
+      return render();
+    }
+    case "schlaf": {
+      if (c.action === "set") { await saveSettings({ sleep_hours: Math.min(12, Math.max(4, c.hours)) }); await updateSleepRoutine(); }
+      const p = wellness.sleep();
+      return toast(p ? t("Schlafenszeit {b}, aufstehen {w} vor Fajr", { b: p.bed, w: p.wake }) : t("Für die Schlafenszeit einmal den Standort setzen."));
+    }
+    case "scan":
+      if (state.view !== "einkauf") switchView("einkauf");
+      return scanner.open();
+    case "frist": {
+      if (state.view !== "fristen") switchView("fristen");
+      const r = await deadlines.runVoice(c);
+      if (r?.msg) toast(r.msg, r.undo ?? null);
+      state.upcoming = null;
+      return refresh();
     }
     case "suche":
       state.search = c.q;
@@ -1547,6 +1757,10 @@ const HELP = {
     ["Training", ["Starte Training", "Starte Brusttraining", "Starte Beintag", "Hammer Curls 14 kg 12 Wiederholungen", "Latziehen breit 50 kg 12 Wiederholungen", "3x12 mit 30 kg Seil nach unten", "40 kg 10 mal", "Seitstütz 45 Sekunden", "Laufband 10 Minuten Steigung 10", "Latziehen 50 kg 10 Wiederholungen 2 übrig", "Gewicht 99,5", "Bauchumfang 104", "Face Pulls entfernen", "Face Pulls als Nächstes", "Hyperextensions ans Ende", "Zeig die Analyse", "Training beenden", "Training fortsetzen"]],
     ["Einkauf", ["Milch, 6 Eier und 500 g Hack auf die Einkaufsliste", "Wir brauchen Brot", "Milch gekauft", "Streich Skyr von der Einkaufsliste", "Was muss ich einkaufen", "Einkauf abschließen 45 Euro", "Dringend Brot auf die Einkaufsliste", "Milch bis Samstag auf die Einkaufsliste", "Einkaufsbudget 400 Euro", "Einkaufsliste teilen", "Öffne Einkauf"]],
     ["Vorrat", ["Magnesium aufgefüllt 60", "Noch 40 Ashwagandha", "Wie lange reicht Magnesium", "Zeig den Vorrat"]],
+    ["Wasser und Schlaf", ["Ein Glas Wasser", "2 Gläser Wasser getrunken", "Halber Liter Wasser", "Wie viel Wasser habe ich getrunken", "Wann soll ich schlafen", "Schlafziel 8 Stunden"]],
+    ["Koran und Ramadan", ["Koran 5 Seiten gelesen", "Ein Juz gelesen", "Ich bin bei Seite 245 im Koran", "Koran-Ziel bis 30. März", "Heute gefastet", "Nicht gefastet", "Fasten nachgeholt", "Ramadan-Modus an", "Zeig Koran"]],
+    ["Fristen", ["TÜV am 12.3.2027", "Handyvertrag endet am 1.8.2027 Kündigungsfrist 3 Monate", "Personalausweis läuft am 5.6.2029 ab", "Kfz-Versicherung 1.1.2027", "Öffne Fristen"]],
+    ["Scanner und Rückblick", ["Scanne Barcode", "Ist das halal", "Zeig den Wochenrückblick"]],
     ["Einstellungen", ["Sprich Türkisch", "Dunkler Modus", "Heller Modus"]],
   ],
   tr: [
@@ -1557,6 +1771,10 @@ const HELP = {
     ["Antrenman", ["Antrenmana başla", "Göğüs antrenmanını başlat", "Bacak omuz antrenmanını başlat", "Çekiç curl 14 kilo 12 tekrar", "Lat çekme geniş 50 kilo 12 tekrar", "Triseps halat aşağı 3 set 12 tekrar 30 kilo", "Koşu bandı 10 dakika eğim 10", "Lat çekme 50 kilo 10 tekrar 2 yedek", "Kilom 99,5", "Bel çevresi 104", "Face Pull çıkar", "Face Pull'u öne al", "Hiperekstansiyonu sona al", "Antrenman analizi", "Antrenmanı bitir", "Antrenmana devam et"]],
     ["Alışveriş", ["Alışveriş listesine süt ve yumurta ekle", "Ekmek lazım", "Süt aldım", "Alışveriş listesinden sütü sil", "Alışveriş listesini göster", "Alışverişi bitir 45 euro", "Acil ekmek lazım", "Alışveriş listesine cumartesiye kadar süt ekle", "Alışveriş bütçesi 400", "Alışveriş listesini paylaş"]],
     ["Stok", ["Magnezyum doldurdum 60", "40 tane ashwagandha kaldı", "Magnezyum ne kadar yeter", "Stoku göster"]],
+    ["Su ve uyku", ["Bir bardak su içtim", "2 bardak su", "Yarım litre su", "Ne kadar su içtim", "Ne zaman yatmalıyım", "Uyku hedefi 8 saat"]],
+    ["Kuran ve Ramazan", ["Kuran 5 sayfa okudum", "Bir cüz okudum", "Kuran 245. sayfadayım", "Kuran hatmi 30 mart'a kadar", "Oruç tuttum", "Oruç tutmadım", "Kaza orucu tuttum", "Ramazan modunu aç", "Kuran'ı göster"]],
+    ["Süreler", ["Muayene 12.3.2027", "Telefon sözleşmesi 1.8.2027 fesih süresi 3 ay", "Kimlik 5.6.2029'da bitiyor", "Süreleri göster"]],
+    ["Tarayıcı ve özet", ["Barkod tara", "Helal mi", "Haftalık özeti göster"]],
     ["Ayarlar", ["Almancaya geç", "Koyu mod", "Açık mod"]],
   ],
 };
@@ -1683,9 +1901,60 @@ document.addEventListener("visibilitychange", () => {
 });
 showLock();
 
+// ---------- Homescreen-Widget (Scriptable) ----------
+function widgetScript(url) {
+  return `// Tagesplan-Widget: nächstes Gebet und nächste Aufgabe
+const URL_ = ${JSON.stringify(url)};
+let d = null;
+try { d = await new Request(URL_).loadJSON(); } catch (e) {}
+const w = new ListWidget();
+const g = new LinearGradient();
+g.colors = [new Color("#1F7A8C"), new Color("#0B3D4A")]; g.locations = [0, 1];
+w.backgroundGradient = g;
+w.url = "https://xnomercy.github.io/ems-tagesplan/";
+w.setPadding(14, 16, 14, 16);
+const head = w.addText("Tagesplan"); head.textColor = new Color("#51B8C4"); head.font = Font.heavySystemFont(12);
+w.addSpacer(8);
+function line(label, value, sub) {
+  const l = w.addText(label); l.textColor = new Color("#B9DCE2"); l.font = Font.semiboldSystemFont(11);
+  const v = w.addText(value); v.textColor = Color.white(); v.font = Font.boldSystemFont(16); v.lineLimit = 1; v.minimumScaleFactor = 0.7;
+  if (sub) { const s = w.addText(sub); s.textColor = new Color("#B9DCE2"); s.font = Font.systemFont(11); s.lineLimit = 1; }
+  w.addSpacer(6);
+}
+if (!d) line("Offline", "–");
+else {
+  if (d.prayer) line(d.prayer.label, d.prayer.name + " " + d.prayer.time, d.prayer.in);
+  if (d.task) line(d.task.label, d.task.title, d.task.when);
+  if (d.ramadan) line(d.ramadan.label, d.ramadan.iftar);
+}
+w.addSpacer();
+w.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000);
+Script.setWidget(w);
+if (config.runsInApp) await w.presentMedium();
+Script.complete();
+`;
+}
+function openWidgetSetup() {
+  const url = `${SUPABASE_URL}/functions/v1/widget?token=${state.settings?.calendar_token}&lang=${LANG}`;
+  form.innerHTML = `<h3>${t("Widget einrichten")}</h3>
+    <ol class="steps">
+      <li>${t("Lade die kostenlose App Scriptable aus dem App Store.")}</li>
+      <li>${t("Kopier das Skript und füge es in Scriptable mit + als neues Skript ein. Name: Tagesplan.")}</li>
+      <li>${t("Homescreen lange drücken, + tippen, Scriptable wählen, mittleres Widget hinzufügen.")}</li>
+      <li>${t("Widget antippen und als Skript Tagesplan wählen.")}</li>
+    </ol>
+    <div class="sheet-actions"><button type="button" class="primary" id="w-copy">${t("Skript kopieren")}</button></div>
+    <button type="button" class="btn" id="w-link">${t("Nur den Link kopieren (für Kurzbefehle)")}</button>
+    <p class="small muted">${t("Der Link enthält deinen geheimen Kalender-Schlüssel. Nicht weitergeben.")}</p>`;
+  form.onsubmit = (e) => e.preventDefault();
+  form.querySelector("#w-copy").onclick = () => navigator.clipboard.writeText(widgetScript(url)).then(() => toast(t("Skript kopiert")), () => toast(t("Kopieren nicht möglich")));
+  form.querySelector("#w-link").onclick = () => navigator.clipboard.writeText(url + "&format=text").then(() => toast(t("Link kopiert")));
+  openSheet(sheet);
+}
+
 // ---------- Daten exportieren ----------
 async function exportData() {
-  const names = ["routines", "items", "completions", "supplies", "exercises", "workouts", "workout_sessions", "workout_sets", "settings"];
+  const names = ["routines", "items", "completions", "supplies", "exercises", "workouts", "workout_sessions", "workout_sets", "body_metrics", "daily_log", "deadlines", "shopping_lists", "shopping_items", "shopping_trips", "settings"];
   const res = await Promise.all(names.map((n) => db.from(n).select("*")));
   const out = { exportiert: new Date().toISOString(), app_version: APP_VERSION };
   names.forEach((n, i) => (out[n] = res[i].data ?? []));
