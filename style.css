@@ -450,3 +450,45 @@ svg.progress { width: 100%; height: auto; background: var(--card); border-radius
 .w-row span { flex: 1; font-size: 14px; font-weight: 700; }
 .w-row button { width: 34px; height: 34px; border: 0; border-radius: 10px; background: var(--bg); color: var(--text); font-size: 16px; }
 .w-row button:disabled { opacity: .3; }
+
+/* v18: Übung entfernen, Vorschläge, Analyse */
+.ex-title { flex: 1; min-width: 0; }
+.ex-mv { flex: none; align-self: flex-start; display: flex; gap: 4px; }
+.ex-mv button { width: 34px; height: 34px; border: 0; border-radius: 10px; background: var(--bg); color: var(--text); font-size: 17px; font-weight: 800; line-height: 1; }
+.ex-mv button:disabled { opacity: .3; }
+.ex-foot .ex-rm { color: var(--muted); }
+.sug { margin: 4px 0 0; font-weight: 700; color: var(--petrol); }
+.sug.up { color: var(--done); }
+.sug.down { color: var(--danger); }
+.an-card .an-tiles { margin-top: 6px; }
+.an-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.an-tiles div { background: var(--bg); border-radius: 14px; padding: 10px 8px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 2px; }
+.an-tiles b { font-size: 20px; font-variant-numeric: tabular-nums; }
+.an-tiles span { font-size: 11px; color: var(--muted); font-weight: 600; line-height: 1.2; }
+.an-tips { display: flex; flex-direction: column; gap: 8px; }
+.an-tip { display: flex; gap: 10px; align-items: flex-start; margin: 8px 0 0; font-size: 14px; line-height: 1.4; }
+.an-tips .an-tip { margin: 0; background: var(--card); border-radius: 14px; padding: 10px 12px; }
+.an-tip i { flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-weight: 800; font-size: 13px; background: var(--soft); color: var(--petrol); }
+.an-tip.warn i { background: #FDECE3; color: var(--danger); }
+:root[data-theme="dark"] .an-tip.warn i { background: #3A2219; }
+.an-tip.time i { background: var(--done-bg); color: var(--done); }
+svg.bars { width: 100%; height: auto; background: var(--card); border-radius: 14px; stroke: none; }
+.bars rect, .bars text { stroke: none; }
+.bars rect { fill: var(--tuerkis); opacity: .55; }
+.bars rect.now { fill: var(--petrol); opacity: 1; }
+.bars text { fill: var(--text); font-size: 10px; font-weight: 700; }
+.bars text.lbl { fill: var(--muted); font-weight: 600; }
+.gauges { display: flex; flex-direction: column; gap: 10px; background: var(--card); border-radius: 14px; padding: 12px; }
+.gauge { display: grid; grid-template-columns: 1fr auto; gap: 4px; font-size: 14px; font-weight: 700; }
+.gauge i { grid-column: 1 / -1; height: 8px; border-radius: 4px; background: var(--soft); overflow: hidden; }
+.gauge i b { display: block; height: 100%; border-radius: 4px; background: var(--danger); }
+.gauge i b.mid { background: var(--tuerkis); }
+.gauge i b.ok { background: var(--done); }
+.an-ex { display: flex; flex-direction: column; gap: 6px; }
+.an-ex button { display: flex; gap: 10px; align-items: center; text-align: left; border: 0; background: var(--card); color: var(--text); border-radius: 14px; padding: 6px 10px 6px 6px; font: inherit; }
+.an-ex button > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.an-ex .sug { margin: 0; }
+.an-ex .badge { align-self: flex-start; }
+.badge.warn { background: #FDECE3; color: var(--danger); }
+.an-days div { display: flex; flex-direction: column; gap: 2px; padding: 9px 0; border-bottom: 1px solid var(--soft); }
+.ex-foot { display: flex; align-items: center; justify-content: space-between; }

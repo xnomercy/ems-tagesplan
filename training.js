@@ -1,5 +1,6 @@
 // Training: Pläne mit Übungen, Sätze mit kg und Wiederholungen, Pause-Timer, Verlauf je Übung.
 import { PATTERNS, figureSvg } from "./figures.js";
+import { analyse, suggest, sessionStats, planMinutes, GROUPS } from "./analyse.js";
 
 // Startplan aus der Beschreibung des Nutzers (Rücken + Trizeps)
 const SEED = [
@@ -25,6 +26,8 @@ const EXTRA = [
   ["Laufband bergauf", "treadmill", "cardio", 1, 0, "8 bis 12 % Steigung, 4,5 bis 5,5 km/h, nicht festhalten"],
 ];
 const EXTRA_KEY = "tagesplan-train-v2";
+// Pro laufendem Training: entfernte und dazugenommene Übungen (überlebt Neuladen)
+const RUN_KEY = "tagesplan-train-run";
 
 export function createTraining(ctx) {
   const { db, t, esc, $, toast, openSheet, closeSheet, sheet, form, isoDate, fmtDay, LOCALE } = ctx;
@@ -63,6 +66,18 @@ export function createTraining(ctx) {
     return kg ? { v: kg, u: "kg" } : { v: Math.max(0, ...sets.map((s) => s.reps ?? 0)), u: t("Wdh.") };
   };
   const volume = (sets) => sets.reduce((a, s) => a + (Number(s.kg) || 0) * (s.reps || 0), 0);
+  // Dauer als "52 Min." oder "1:15 h"
+  const fmtDur = (min) => (min < 60 ? t("{n} Min.", { n: min }) : `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")} h`);
+  // Text eines Vorschlags oder Hinweises übersetzen, Zahlen und Namen passend einsetzen
+  const tx = (o) => t(o.text, Object.fromEntries(Object.entries(o.vars ?? {}).map(([k, v]) => [k, typeof v === "number" ? num(v) : k === "g" || k === "hint" ? t(v) : v])));
+
+  // ---------- Laufendes Training: entfernte und zusätzliche Übungen ----------
+  function runState(run) {
+    let st = null;
+    try { st = JSON.parse(localStorage.getItem(RUN_KEY) || "null"); } catch {}
+    return st?.sid === run.id ? st : { sid: run.id, hidden: [], extra: [] };
+  }
+  function saveRunState(st) { try { localStorage.setItem(RUN_KEY, JSON.stringify(st)); } catch {} }
 
   function load(force = false) {
     if (T.loaded && !force) return Promise.resolve();
@@ -123,8 +138,16 @@ export function createTraining(ctx) {
   }
 
   // ---------- Übersicht ----------
+  let elapsedTimer = null;
   function render(host) {
     T.host = host;
+    clearInterval(elapsedTimer);
+    // Laufende Dauer im Kopf des Trainings mitzählen
+    elapsedTimer = setInterval(() => {
+      const el = T.host?.querySelector("[data-elapsed]"), run = active();
+      if (!el || !run) return clearInterval(elapsedTimer);
+      el.textContent = t("Dauer {x}", { x: fmtDur(Math.max(0, Math.round((Date.now() - Date.parse(run.started_at)) / 60000))) });
+    }, 20000);
     if (!T.loaded) { host.innerHTML = `<div class="empty">${t("Lade …")}</div>`; load().then(() => render(host)); return; }
     const run = active();
     host.innerHTML = run ? runHtml(run) : homeHtml();
@@ -135,11 +158,20 @@ export function createTraining(ctx) {
 
   function homeHtml() {
     let html = "";
+    // Kurzfassung der Analyse oben, Details im eigenen Blatt
+    const A = analyse({ exercises: T.exercises, sessions: T.sessions, sets: T.sets });
+    if (A.stats.length) {
+      const top = A.tips.find((x) => x.level !== "info");
+      html += `<div class="card an-card"><p class="eyebrow">${t("Analyse")}</p>
+        <div class="an-tiles"><div><b>${A.last7}</b><span>${t("Tage in 7 Tagen")}</span></div><div><b>${A.avgMin != null ? fmtDur(A.avgMin) : "–"}</b><span>${t("Ø Dauer")}</span></div><div><b>${A.streak}</b><span>${t("Wochen in Folge")}</span></div></div>
+        ${top ? `<p class="small an-tip ${top.level}">${esc(tx(top))}</p>` : ""}
+        <button type="button" class="link-btn" id="an-open">${t("Ganze Analyse und Vorschläge")} ›</button></div>`;
+    }
     for (const w of T.workouts) {
       const last = T.sessions.find((s) => s.workout_id === w.id && s.finished_at);
       html += `<div class="card plan-card">
         <div class="plan-head"><div><p class="eyebrow">${t("Trainingsplan")}</p><h3>${esc(w.name)}</h3>
-          <p class="small muted">${t("{n} Übungen", { n: w.exercise_ids.length })}${last ? " · " + t("zuletzt {d}", { d: fmtDay(isoDate(new Date(last.started_at))) }) : ""}</p></div>
+          <p class="small muted">${t("{n} Übungen", { n: w.exercise_ids.length })} · ${t("ca. {n} Min.", { n: planMinutes(w, exById) })}${last ? " · " + t("zuletzt {d}", { d: fmtDay(isoDate(new Date(last.started_at))) }) : ""}</p></div>
           <button type="button" class="link-btn" data-w-edit="${w.id}">${t("Bearbeiten")}</button></div>
         <div class="plan-figs">${w.exercise_ids.map(exById).filter(Boolean).map((x) => figureSvg(x.pattern, { size: 54, animate: false })).join("")}</div>
         <button type="button" class="btn fill" data-w-start="${w.id}">${t("Training starten")}</button>
@@ -160,8 +192,8 @@ export function createTraining(ctx) {
       html += `<div class="section-head"><h3>${t("Letzte Trainings")}</h3></div>`;
       html += done.map((s) => {
         const sets = T.sets.filter((x) => x.session_id === s.id);
-        const mins = Math.round((Date.parse(s.finished_at) - Date.parse(s.started_at)) / 60000);
-        return `<div class="card hist-card"><b>${esc(s.name ?? t("Training"))}</b><span class="small muted">${fmtDay(isoDate(new Date(s.started_at)), { weekday: "long", day: "numeric", month: "long" })} · ${t("{n} Min.", { n: mins })}</span>
+        const st = sessionStats(s, T.sets, exById);
+        return `<div class="card hist-card"><b>${esc(s.name ?? t("Training"))}</b><span class="small muted">${fmtDay(isoDate(new Date(s.started_at)), { weekday: "long", day: "numeric", month: "long" })} · ${hm(st.start)}–${hm(st.end)} · ${fmtDur(st.minutes)}</span>
           <span class="small">${volume(sets) ? t("{n} Sätze · {kg} kg bewegt", { n: sets.length, kg: num(Math.round(volume(sets))) }) : t("{n} Sätze", { n: sets.length })}</span></div>`;
       }).join("");
     }
@@ -173,27 +205,40 @@ export function createTraining(ctx) {
     const w = T.workouts.find((x) => x.id === run.workout_id);
     const ids = [...(w?.exercise_ids ?? [])];
     for (const s of T.sets) if (s.session_id === run.id && !ids.includes(s.exercise_id)) ids.push(s.exercise_id);
-    for (const id of T.extraEx) if (!ids.includes(id)) ids.push(id);
-    return ids.map(exById).filter(Boolean);
+    const st = runState(run);
+    for (const id of st.extra) if (!ids.includes(id)) ids.push(id);
+    // Eigene Reihenfolge für heute; neue Übungen behalten ihren Platz am Ende
+    if (st.order?.length) {
+      const pos = (id) => { const i = st.order.indexOf(id); return i < 0 ? 1000 + ids.indexOf(id) : i; };
+      ids.sort((a, b) => pos(a) - pos(b));
+    }
+    // Entfernte Übungen ausblenden, außer es wurden inzwischen doch Sätze gespeichert
+    return ids.filter((id) => !st.hidden.includes(id) || T.sets.some((s) => s.session_id === run.id && s.exercise_id === id)).map(exById).filter(Boolean);
   }
 
   function runHtml(run) {
     const mins = Math.max(0, Math.round((Date.now() - Date.parse(run.started_at)) / 60000));
     const all = T.sets.filter((s) => s.session_id === run.id);
     let html = `<div class="hero run-hero"><p class="eyebrow">${t("Training läuft")}</p><h2>${esc(run.name ?? t("Training"))}</h2>
-      <div class="meta"><span>${t("seit {n} Min.", { n: mins })}</span><span>${volume(all) ? t("{n} Sätze · {kg} kg", { n: all.length, kg: num(Math.round(volume(all))) }) : t("{n} Sätze", { n: all.length })}</span></div></div>`;
-    for (const x of runExercises(run)) {
+      <div class="meta"><span data-elapsed>${t("Dauer {x}", { x: fmtDur(mins) })}</span><span>${volume(all) ? t("{n} Sätze · {kg} kg", { n: all.length, kg: num(Math.round(volume(all))) }) : t("{n} Sätze", { n: all.length })}</span></div></div>`;
+    const list = runExercises(run);
+    for (const [idx, x] of list.entries()) {
       const logged = setsOf(run.id, x.id);
       const prev = lastSets(x.id, run.id);
+      const sug = suggest(x, T.sessions, T.sets, run.id);
       const rows = Math.max(logged.length, x.sets ?? 3, prev?.sets.length ?? 0) + (T.extraRows[x.id] ?? 0);
       const allDone = logged.length >= rows;
       html += `<div class="card ex-card ${allDone ? "complete" : ""}" data-run-ex="${x.id}">
         <div class="ex-top"><button type="button" class="fig-btn" data-ex="${x.id}" aria-label="${esc(x.name)}">${figureSvg(x.pattern, { size: 92 })}</button>
-          <div><h3>${esc(x.name)}</h3><p class="small muted">${prev ? t("Letztes Mal: {x}", { x: prev.sets.map(fmtSet).join(" · ") }) : t("Erstes Mal")}</p></div></div>
+          <div class="ex-title"><h3>${esc(x.name)}</h3><p class="small muted">${prev ? t("Letztes Mal: {x}", { x: prev.sets.map(fmtSet).join(" · ") }) : t("Erstes Mal")}</p>
+          ${sug ? `<p class="small sug ${sug.kind}">${t("Heute")}: ${esc(tx(sug))}</p>` : ""}</div>
+          <span class="ex-mv"><button type="button" data-mv="${x.id}:-1" aria-label="${t("Nach oben")}" ${idx ? "" : "disabled"}>↑</button><button type="button" data-mv="${x.id}:1" aria-label="${t("Nach unten")}" ${idx < list.length - 1 ? "" : "disabled"}>↓</button></span></div>
         <div class="set-grid" style="grid-template-columns: 40px repeat(${FIELDS[modeOf(x)].length}, 1fr) 48px"><span>${t("Satz")}</span>${FIELDS[modeOf(x)].map((f) => `<span>${t(f.label)}</span>`).join("")}<span></span>`;
       for (let i = 0; i < rows; i++) {
         const s = logged[i];
-        const ph = prev?.sets[i] ?? logged[logged.length - 1] ?? prev?.sets[prev.sets.length - 1];
+        let ph = prev?.sets[i] ?? logged[logged.length - 1] ?? prev?.sets[prev.sets.length - 1];
+        // Vorschlag steigern/senken: Arbeitssätze bekommen das neue Gewicht als Vorgabe
+        if (ph && !logged[logged.length - 1] && sug?.target && sug.kind !== "keep" && (Number(ph.kg) || 0) >= sug.top * 0.9) ph = { ...ph, kg: sug.target.kg };
         const d = T.draft[x.id]?.[i] ?? {};
         if (s) {
           html += `<span class="set-no done">${i + 1}</span>${FIELDS[modeOf(x)].map((f) => `<span class="set-val">${num(fieldVal(s, f))}</span>`).join("")}
@@ -203,8 +248,11 @@ export function createTraining(ctx) {
             <button type="button" class="check" data-log="${x.id}:${i}" aria-label="${t("Satz speichern")}"></button>`;
         }
       }
-      html += `</div><button type="button" class="link-btn add-set" data-add-row="${x.id}">${t("+ Satz")}</button></div>`;
+      html += `</div><div class="ex-foot"><button type="button" class="link-btn add-set" data-add-row="${x.id}">${t("+ Satz")}</button>
+        <button type="button" class="link-btn ex-rm" data-rm-ex="${x.id}">${t("Entfernen")}</button></div></div>`;
     }
+    const w = T.workouts.find((y) => y.id === run.workout_id);
+    if (w && planOrder(run, w).join() !== w.exercise_ids.join()) html += `<button type="button" class="link-btn" id="run-order" style="margin-top:6px">${t("Diese Reihenfolge im Plan speichern")}</button>`;
     const others = T.exercises.filter((x) => !runExercises(run).includes(x));
     if (others.length) html += `<p class="small muted" style="margin-top:14px">${t("Übung dazunehmen")}</p><div class="chips">${others.map((x) => `<button type="button" class="chip" data-add-ex="${x.id}">+ ${esc(x.name)}</button>`).join("")}</div>`;
     html += `<button type="button" class="primary" id="run-finish">${t("Training beenden")}</button>
@@ -219,7 +267,8 @@ export function createTraining(ctx) {
     const { data, error } = await db.from("workout_sessions").insert({ workout_id: w?.id ?? null, name: w?.name ?? t("Training") }).select().single();
     if (error) return toast(error.message);
     T.sessions.unshift(data);
-    T.draft = {}; T.extraRows = {}; T.extraEx = [];
+    T.draft = {}; T.extraRows = {};
+    saveRunState({ sid: data.id, hidden: [], extra: [] });
     rerender();
     window.scrollTo(0, 0);
   }
@@ -257,13 +306,84 @@ export function createTraining(ctx) {
     if (!run) return;
     const all = T.sets.filter((s) => s.session_id === run.id);
     if (!all.length) return cancel(true);
-    const finished_at = new Date().toISOString();
+    // Länger als 20 Min. nach dem letzten Satz beendet: wahrscheinlich vergessen, dann zählt der letzte Satz
+    let end = Date.now();
+    const lastAt = Math.max(...all.map((s) => Date.parse(s.created_at)));
+    if (end - lastAt > 20 * 60000 && confirm(t("Der letzte Satz war um {h}. Training um {e} enden lassen? (Abbrechen: jetzt)", { h: hm(lastAt), e: hm(lastAt + 3 * 60000) }))) end = lastAt + 3 * 60000;
+    const finished_at = new Date(end).toISOString();
     await db.from("workout_sessions").update({ finished_at }).eq("id", run.id);
     run.finished_at = finished_at;
     stopRest();
     await ctx.onFinish?.(run);
     const vol = Math.round(volume(all));
-    toast(vol ? t("Training gespeichert: {n} Sätze, {kg} kg bewegt", { n: all.length, kg: num(vol) }) : t("Training gespeichert: {n} Sätze", { n: all.length }));
+    const dur = fmtDur(Math.round((end - Date.parse(run.started_at)) / 60000));
+    toast(vol ? t("Training gespeichert: {d}, {n} Sätze, {kg} kg bewegt", { d: dur, n: all.length, kg: num(vol) }) : t("Training gespeichert: {d}, {n} Sätze", { d: dur, n: all.length }));
+    rerender();
+  }
+
+  const hm = (ms) => new Date(ms).toLocaleTimeString(LOCALE(), { hour: "2-digit", minute: "2-digit" });
+
+  // Übung aus dem laufenden Training nehmen; gespeicherte Sätze nur nach Rückfrage löschen
+  async function removeEx(exId) {
+    const run = active();
+    if (!run) return;
+    const x = exById(exId);
+    const logged = setsOf(run.id, exId);
+    if (logged.length) {
+      if (!confirm(t("„{x}“ entfernen? Die {n} gespeicherten Sätze von heute werden gelöscht.", { x: x?.name ?? "", n: logged.length }))) return false;
+      await db.from("workout_sets").delete().eq("session_id", run.id).eq("exercise_id", exId);
+      T.sets = T.sets.filter((s) => !(s.session_id === run.id && s.exercise_id === exId));
+    }
+    const st = runState(run);
+    if (!st.hidden.includes(exId)) st.hidden.push(exId);
+    st.extra = st.extra.filter((id) => id !== exId);
+    saveRunState(st);
+    if (T.draft[exId]) delete T.draft[exId];
+    if (T.lastEx === exId) T.lastEx = null;
+    toast(t("Entfernt: {x}", { x: x?.name ?? "" }));
+    rerender();
+    return true;
+  }
+  // Übung im laufenden Training nach oben (-1), unten (1) oder an den Anfang ("first") schieben
+  function moveEx(exId, dir) {
+    const run = active();
+    if (!run) return;
+    const ids = runExercises(run).map((x) => x.id);
+    const i = ids.indexOf(exId);
+    if (i < 0) return;
+    const j = dir === "first" ? 0 : dir === "last" ? ids.length - 1 : Math.max(0, Math.min(ids.length - 1, i + dir));
+    ids.splice(i, 1); ids.splice(j, 0, exId);
+    const st = runState(run);
+    st.order = ids;
+    saveRunState(st);
+    rerender();
+    // die verschobene Übung im Blick behalten
+    requestAnimationFrame(() => T.host?.querySelector(`[data-run-ex="${exId}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+  }
+  // Reihenfolge von heute für den Plan: sichtbare Planübungen in neuer Folge, entfernte hinten dran
+  function planOrder(run, w) {
+    const vis = runExercises(run).map((x) => x.id).filter((id) => w.exercise_ids.includes(id));
+    return [...vis, ...w.exercise_ids.filter((id) => !vis.includes(id))];
+  }
+  async function savePlanOrder() {
+    const run = active();
+    const w = T.workouts.find((y) => y.id === run?.workout_id);
+    if (!w) return;
+    const ids = planOrder(run, w);
+    const { error } = await db.from("workouts").update({ exercise_ids: ids }).eq("id", w.id);
+    if (error) return toast(error.message);
+    w.exercise_ids = ids;
+    toast(t("Reihenfolge gespeichert: {x}", { x: w.name }));
+    rerender();
+  }
+
+  function addEx(exId) {
+    const run = active();
+    if (!run) return;
+    const st = runState(run);
+    st.hidden = st.hidden.filter((id) => id !== exId);
+    if (!runExercises(run).some((x) => x.id === exId)) st.extra.push(exId);
+    saveRunState(st);
     rerender();
   }
 
@@ -280,14 +400,32 @@ export function createTraining(ctx) {
   }
 
   // ---------- Pause-Timer ----------
+  // Mitteilung am Ende: im Vordergrund direkt vom Handy, im Hintergrund schickt der Server sie (Tabelle rest_alarms)
   let restTimer = null;
+  const restMsg = () => ({ title: t("Pause vorbei"), body: T.rest?.ex ? t("Nächster Satz: {x}", { x: T.rest.ex }) : t("Weiter geht's mit dem nächsten Satz") });
+  function armAlarm() {
+    if (!T.rest) return;
+    const { title, body } = restMsg();
+    db.from("rest_alarms").upsert({ due_at: new Date(T.rest.until).toISOString(), title, body }, { onConflict: "user_id" }).then(() => {}, () => {});
+  }
+  function disarmAlarm() { db.from("rest_alarms").delete().not("due_at", "is", null).then(() => {}, () => {}); }
+  async function notifyLocal() {
+    try {
+      if (!("Notification" in window) || Notification.permission !== "granted") return;
+      const reg = await navigator.serviceWorker?.ready;
+      const { title, body } = restMsg();
+      await reg?.showNotification(title, { body, tag: "rest", renotify: true, icon: "icon-192.png", badge: "icon-192.png", data: { url: "./" } });
+    } catch {}
+  }
   function startRest(sec) {
-    T.rest = { until: Date.now() + sec * 1000 };
+    const x = exById(T.lastEx);
+    T.rest = { until: Date.now() + sec * 1000, ex: x?.name ?? "" };
     clearInterval(restTimer);
     restTimer = setInterval(paintRest, 500);
+    armAlarm();
     paintRest();
   }
-  function stopRest() { T.rest = null; clearInterval(restTimer); paintRest(); }
+  function stopRest() { if (T.rest && !T.rest.claimed) disarmAlarm(); T.rest = null; clearInterval(restTimer); paintRest(); }
   function paintRest() {
     let bar = $("#rest");
     if (!T.rest || !active()) { bar?.remove(); return; }
@@ -297,8 +435,15 @@ export function createTraining(ctx) {
       document.body.append(bar);
     }
     const left = Math.ceil((T.rest.until - Date.now()) / 1000);
+    // App ist offen: kurz vor Ende selbst übernehmen, damit der Server nicht doppelt schickt
+    if (left <= 1 && !T.rest.claimed && document.visibilityState === "visible") { T.rest.claimed = true; disarmAlarm(); }
     if (left <= 0) {
-      if (!T.rest.rang) { T.rest.rang = true; if (navigator.vibrate) navigator.vibrate([200, 100, 200]); }
+      if (!T.rest.rang) {
+        T.rest.rang = true;
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+        // nur wenn die Pause gerade eben endet; kommt die App später zurück, kam die Mitteilung schon vom Server
+        if (T.rest.claimed && left > -3) notifyLocal();
+      }
       bar.className = "go";
       bar.innerHTML = `<span>${t("Pause vorbei, nächster Satz")}</span><button type="button" data-rest="stop">OK</button>`;
       if (left < -20) stopRest();
@@ -307,7 +452,7 @@ export function createTraining(ctx) {
       bar.innerHTML = `<span>${t("Pause")} <b>${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}</b></span>
         <button type="button" data-rest="add">+30 s</button><button type="button" data-rest="stop">${t("Weiter")}</button>`;
     }
-    bar.querySelectorAll("[data-rest]").forEach((b) => (b.onclick = () => { if (b.dataset.rest === "add") { T.rest.until += 30000; paintRest(); } else stopRest(); }));
+    bar.querySelectorAll("[data-rest]").forEach((b) => (b.onclick = () => { if (b.dataset.rest === "add") { T.rest.until += 30000; T.rest.claimed = false; T.rest.rang = false; armAlarm(); paintRest(); } else stopRest(); }));
   }
 
   // ---------- Bedienung ----------
@@ -337,7 +482,11 @@ export function createTraining(ctx) {
     }));
     host.querySelectorAll("[data-unlog]").forEach((b) => (b.onclick = () => unlog(b.dataset.unlog)));
     host.querySelectorAll("[data-add-row]").forEach((b) => (b.onclick = () => { T.extraRows[b.dataset.addRow] = (T.extraRows[b.dataset.addRow] ?? 0) + 1; rerender(); }));
-    host.querySelectorAll("[data-add-ex]").forEach((b) => (b.onclick = () => { T.extraEx.push(b.dataset.addEx); rerender(); }));
+    host.querySelectorAll("[data-add-ex]").forEach((b) => (b.onclick = () => addEx(b.dataset.addEx)));
+    host.querySelectorAll("[data-mv]").forEach((b) => (b.onclick = () => { const [id, d] = b.dataset.mv.split(":"); moveEx(id, Number(d)); }));
+    host.querySelector("#run-order")?.addEventListener("click", savePlanOrder);
+    host.querySelectorAll("[data-rm-ex]").forEach((b) => (b.onclick = () => removeEx(b.dataset.rmEx)));
+    host.querySelector("#an-open")?.addEventListener("click", openAnalysis);
     host.querySelector("#run-finish")?.addEventListener("click", finish);
     host.querySelector("#run-cancel")?.addEventListener("click", () => cancel());
   }
@@ -367,6 +516,7 @@ export function createTraining(ctx) {
         <dt>${t("Bestwert")}</dt><dd>${best.v ? num(best.v) + " " + best.u : "–"}</dd>
         <dt>${t("Standard")}</dt><dd>${t("{n} Sätze · {s} s Pause", { n: x.sets, s: x.rest_sec })}</dd>
         <dt>${t("Trainings")}</dt><dd>${sessions.length}</dd>
+        ${(() => { const sg = suggest(x, T.sessions, T.sets, active()?.id); return sg ? `<dt>${t("Vorschlag")}</dt><dd>${esc(tx(sg))}</dd>` : ""; })()}
       </dl>
       ${points.length > 1 ? `<p class="eyebrow" style="margin-top:14px">${t(best.u === "kg" ? "Höchstes Gewicht je Training" : "Bester Wert je Training")}</p>${progressSvg(points, best.u)}` : ""}
       ${sessions.length ? `<p class="eyebrow" style="margin-top:14px">${t("Verlauf")}</p>
@@ -466,11 +616,75 @@ export function createTraining(ctx) {
     openSheet(sheet);
   }
 
+  // ---------- Analyse ----------
+  function weekBars(weeks) {
+    const W = 300, H = 120, P = 16, bw = (W - 2 * P) / weeks.length;
+    const max = Math.max(60, ...weeks.map((w) => w.minutes));
+    return `<svg class="bars" viewBox="0 0 ${W} ${H}" role="img" aria-label="${t("Trainingszeit pro Woche")}">
+      ${weeks.map((w, i) => {
+        const h = Math.round((w.minutes / max) * (H - 42));
+        const x = P + i * bw + 6;
+        return `<rect x="${x}" y="${H - 22 - h}" width="${bw - 12}" height="${Math.max(h, 2)}" rx="4" class="${i === weeks.length - 1 ? "now" : ""}"><title>${w.minutes} Min · ${w.sets} ${t("Sätze")}</title></rect>
+          <text x="${x + (bw - 12) / 2}" y="${H - 26 - h}" text-anchor="middle">${w.minutes ? fmtDur(w.minutes).replace(" Min.", "′").replace(" h", "") : ""}</text>
+          <text x="${x + (bw - 12) / 2}" y="${H - 6}" text-anchor="middle" class="lbl">${new Date(w.from).toLocaleDateString(LOCALE(), { day: "numeric", month: "numeric" })}</text>`;
+      }).join("")}
+    </svg>`;
+  }
+
+  async function openAnalysis() {
+    await load();
+    const A = analyse({ exercises: T.exercises, sessions: T.sessions, sets: T.sets });
+    const icon = { warn: "!", plan: "→", time: "⏱", info: "i" };
+    const gauge = (g) => {
+      const G = GROUPS[g], v = A.groups[g], pct = Math.min(100, Math.round((v / (G.target || 1)) * 100));
+      return `<div class="gauge"><span>${esc(t(G.label))}</span><span class="small muted">${v} / ${G.target}${g === "cardio" ? " " + t("Einheiten") : ""}</span><i><b style="width:${pct}%" class="${pct >= 100 ? "ok" : pct >= 50 ? "mid" : "low"}"></b></i></div>`;
+    };
+    form.innerHTML = `<h3>${t("Trainingsanalyse")}</h3>
+      <div class="an-tiles">
+        <div><b>${A.last7}</b><span>${t("Tage in 7 Tagen")}</span></div>
+        <div><b>${num(Math.round((A.last28 / 4) * 10) / 10)}</b><span>${t("Ø Tage pro Woche")}</span></div>
+        <div><b>${A.avgMin != null ? fmtDur(A.avgMin) : "–"}</b><span>${t("Ø Dauer")}</span></div>
+        <div><b>${A.avgGap != null ? `${Math.floor(A.avgGap / 60)}:${String(A.avgGap % 60).padStart(2, "0")}` : "–"}</b><span>${t("Ø Zeit pro Satz")}</span></div>
+        <div><b>${A.streak}</b><span>${t("Wochen in Folge")}</span></div>
+        <div><b>${A.restDays ?? "–"}</b><span>${t("Tage seit Training")}</span></div>
+      </div>
+      <p class="eyebrow" style="margin-top:16px">${t("Vorschläge")}</p>
+      <div class="an-tips">${A.tips.length ? A.tips.map((x) => `<p class="an-tip ${x.level}"><i>${icon[x.level] ?? "·"}</i><span>${esc(tx(x))}</span></p>`).join("") : `<p class="small muted">${t("Alles im grünen Bereich. Weiter so.")}</p>`}</div>
+      <p class="eyebrow" style="margin-top:16px">${t("Trainingszeit pro Woche")}</p>
+      ${weekBars(A.weeks)}
+      <p class="eyebrow" style="margin-top:16px">${t("Sätze je Muskelgruppe (7 Tage)")}</p>
+      <div class="gauges">${["back", "rear", "lower", "triceps", "core", "cardio"].map(gauge).join("")}</div>
+      ${A.per.length ? `<p class="eyebrow" style="margin-top:16px">${t("Nächstes Training")}</p>
+      <div class="an-ex">${A.per.map((e) => `<button type="button" data-ex="${e.x.id}">${figureSvg(e.x.pattern, { size: 44, animate: false })}<span><b>${esc(e.x.name)}</b>
+        <span class="small sug ${e.sug?.kind ?? ""}">${e.sug ? esc(tx(e.sug)) : ""}</span>
+        ${e.sug?.pr ? `<span class="badge">${t("Neuer Bestwert")}</span>` : ""}${e.sug?.stall ? `<span class="badge warn">${t("Stillstand")}</span>` : ""}</span></button>`).join("")}</div>` : ""}
+      ${A.stats.length ? `<p class="eyebrow" style="margin-top:16px">${t("Trainingstage")}</p>
+      <div class="an-days">${A.stats.slice(0, 20).map((s) => `<div><span><b>${fmtDay(s.date, { weekday: "short", day: "numeric", month: "short" })}</b> ${esc(s.name ?? "")}${s.running ? ` <span class="badge">${t("läuft")}</span>` : ""}</span>
+        <span class="small muted">${hm(s.start)}–${s.running ? "…" : hm(s.end)} · ${fmtDur(s.minutes)} · ${t("{n} Sätze", { n: s.sets })}${s.volume ? " · " + num(Math.round(s.volume)) + " kg" : ""}${s.avgGap ? " · " + t("Ø {m}:{s} pro Satz", { m: Math.floor(s.avgGap / 60), s: String(s.avgGap % 60).padStart(2, "0") }) : ""}</span></div>`).join("")}</div>` : ""}
+      <p class="small muted" style="margin-top:14px">${t("Regeln: 8 bis 12 Wiederholungen. Schaffst du in allen Arbeitssätzen 12, kommt Gewicht dazu. Unter 6 geht es etwas runter. Stillstand über 3 Trainings: eine leichtere Woche.")}</p>
+      <button type="button" class="ghost" id="an-close">${t("Schließen")}</button>`;
+    form.onsubmit = (e) => e.preventDefault();
+    form.querySelectorAll("[data-ex]").forEach((b) => (b.onclick = () => openExercise(exById(b.dataset.ex))));
+    $("#an-close").onclick = () => closeSheet(sheet);
+    openSheet(sheet);
+  }
+
   // ---------- Sprache ----------
   async function runVoice(c) {
     await load();
     if (c.action === "start") { await start(c.workout?.id); return t("Training gestartet: {x}", { x: active()?.name ?? "" }); }
     if (c.action === "stop") { await finish(); return null; }
+    if (c.action === "analysis") { await openAnalysis(); return null; }
+    if (c.action === "move") {
+      if (!active()) return t("Es läuft gerade kein Training.");
+      moveEx(c.exercise.id, c.dir);
+      return t(c.dir === "first" ? "Als Nächstes: {x}" : "Ans Ende: {x}", { x: c.exercise.name });
+    }
+    if (c.action === "remove") {
+      if (!active()) return t("Es läuft gerade kein Training.");
+      await removeEx(c.exercise.id);
+      return null;
+    }
     const exId = c.exercise?.id ?? (active() && T.lastEx) ?? null;
     if (!exId) return t("Welche Übung? Sag z. B. „Latziehen 50 kg 12 Wiederholungen“.");
     const vals = { kg: c.kg ?? null, reps: c.reps ?? null };
@@ -481,7 +695,7 @@ export function createTraining(ctx) {
   }
 
   return {
-    load, render, start, finish, runVoice,
+    load, render, start, finish, runVoice, openAnalysis,
     active, exercises: () => T.exercises, workouts: () => T.workouts,
     figure: figureSvg,
   };

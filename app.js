@@ -8,7 +8,7 @@ const SUPABASE_URL = "https://hpxdhtuabzqwyslzcmbt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kKiQdntJd893YvBPFx7fhw_FYzlwwtz";
 const DEMO = new URLSearchParams(location.search).has("demo");
 // Bei jeder Veröffentlichung zusammen mit version.json und dem Cache-Namen in sw.js hochzählen
-const APP_VERSION = "17";
+const APP_VERSION = "18";
 const db = DEMO
   ? (await import("./mock.js")).db
   : (await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm")).createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -1164,6 +1164,9 @@ function describe(cmd) {
   if (cmd.type === "training") {
     if (cmd.action === "start") return [t("Training"), t("Starten") + (cmd.workout ? ": " + cmd.workout.name : "")];
     if (cmd.action === "stop") return [t("Training"), t("Beenden")];
+    if (cmd.action === "analysis") return [t("Training"), t("Analyse")];
+    if (cmd.action === "remove") return [t("Übung entfernen"), cmd.exercise.name];
+    if (cmd.action === "move") return [t(cmd.dir === "first" ? "Als Nächstes" : "Ans Ende"), cmd.exercise.name];
     return [t("Satz"), `${cmd.exercise?.name ?? t("letzte Übung")} · ${cmd.sets > 1 ? cmd.sets + " × " : ""}${cmd.kg != null ? fmtNum(cmd.kg) + " kg" : ""}${cmd.reps != null ? " × " + cmd.reps : ""}`];
   }
   if (cmd.type === "vorrat") {
@@ -1460,7 +1463,7 @@ const HELP = {
     ["Abhaken", ["Asr erledigt", "Asr doch nicht erledigt"]],
     ["Ändern", ["Verschiebe Zahnarzt auf Freitag um 10", "Mach Steuer wichtig", "Pausiere Retinol", "Erinnere mich 30 Minuten vorher an Zahnarzt", "Füge Milch zur Einkaufsliste hinzu", "Lösche den Termin Zahnarzt"]],
     ["Anzeigen", ["Was steht morgen an", "Zeig mir die Termine", "Zeig den Monat", "Was habe ich erledigt", "Suche Zahnarzt", "Teile die Routinen nach Tageszeit auf", "Öffne die Einstellungen"]],
-    ["Training", ["Starte Training", "Latziehen breit 50 kg 12 Wiederholungen", "3x12 mit 30 kg Seil nach unten", "40 kg 10 mal", "Seitstütz 45 Sekunden", "Laufband 10 Minuten Steigung 10", "Training beenden"]],
+    ["Training", ["Starte Training", "Latziehen breit 50 kg 12 Wiederholungen", "3x12 mit 30 kg Seil nach unten", "40 kg 10 mal", "Seitstütz 45 Sekunden", "Laufband 10 Minuten Steigung 10", "Face Pulls entfernen", "Face Pulls als Nächstes", "Hyperextensions ans Ende", "Zeig die Analyse", "Training beenden"]],
     ["Vorrat", ["Magnesium aufgefüllt 60", "Noch 40 Ashwagandha", "Wie lange reicht Magnesium", "Zeig den Vorrat"]],
     ["Einstellungen", ["Sprich Türkisch", "Dunkler Modus", "Heller Modus"]],
   ],
@@ -1469,7 +1472,7 @@ const HELP = {
     ["İşaretle", ["İkindiyi kıldım", "İkindiyi kılmadım"]],
     ["Değiştir", ["Diş doktorunu cumaya ertele", "Vergi önemli", "Retinol'ü durdur", "Diş doktoru için 1 saat önce hatırlat", "Alışveriş listesine süt ekle", "Diş doktoru randevusunu sil"]],
     ["Göster", ["Yarın neler var", "Randevuları göster", "Aylık görünüm", "Geçmişi göster", "Diş doktoru bul", "Rutinleri vakte göre sırala", "Ayarları aç"]],
-    ["Antrenman", ["Antrenmana başla", "Lat çekme geniş 50 kilo 12 tekrar", "Triseps halat aşağı 3 set 12 tekrar 30 kilo", "Koşu bandı 10 dakika eğim 10", "Antrenmanı bitir"]],
+    ["Antrenman", ["Antrenmana başla", "Lat çekme geniş 50 kilo 12 tekrar", "Triseps halat aşağı 3 set 12 tekrar 30 kilo", "Koşu bandı 10 dakika eğim 10", "Face Pull çıkar", "Face Pull'u öne al", "Hiperekstansiyonu sona al", "Antrenman analizi", "Antrenmanı bitir"]],
     ["Stok", ["Magnezyum doldurdum 60", "40 tane ashwagandha kaldı", "Magnezyum ne kadar yeter", "Stoku göster"]],
     ["Ayarlar", ["Almancaya geç", "Koyu mod", "Açık mod"]],
   ],

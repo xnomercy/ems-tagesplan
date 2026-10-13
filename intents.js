@@ -81,7 +81,7 @@ function dateTime(s, now, lang) {
 const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 export function parseIntent(text, now = new Date(), targets = [], lang = "de", supplies = [], training = {}) {
-  const s = text.replace(/İ/g, "i").replace(/[!?,.]/g, " ").replace(/\s+/g, " ").trim();
+  const s = text.replace(/İ/g, "i").replace(/[!?]|(?<!\d)[,.]|[,.](?!\d)/g, " ").replace(/\s+/g, " ").trim();
   if (!s) return null;
 
   if (RE.hilfe.test(s)) return { type: "hilfe" };
@@ -236,6 +236,10 @@ function supplyIntent(s, supplies, lang) {
 // ---------- Training: "Starte Training", "Latziehen 50 kg 12 Wiederholungen", "3x12 mit 40 kg Seil runter", "Training beenden" ----------
 const TRAIN_WORD = rx(`\\p{L}*training${W}|workout|gym|fitness|antrenman${W}|spor${W}|idman${W}`);
 const START = rx(`start${W}|beginn${W}|anfangen|fang${W}\\s+an|los\\s+geht${W}|başla${W}|başlat${W}`);
+const ANALYSE = rx(`analyse${W}|analysier${W}|auswert${W}|analiz${W}|değerlendir${W}`);
+const REMOVE = rx(`entfern${W}|raus(?:nehmen)?|weglassen|lass${W}\\s+weg|überspring${W}|streich${W}|çıkar${W}|kaldır${W}|atla${W}`);
+const MOVE_FIRST = rx(`als\\s+nächst${W}|zuerst|vorziehen|zieh${W}\\s+vor|nach\\s+oben|nach\\s+vorne\\s+(?:schieben|holen|nehmen)|öne\\s+al${W}|başa\\s+al${W}|sıradaki\\s+yap`);
+const MOVE_LAST = rx(`ans\\s+ende|zum\\s+schluss|nach\\s+hinten|später|sona\\s+al${W}|sona\\s+bırak${W}|en\\s+sona`);
 const STOP = rx(`beend${W}|fertig|abschließen|stopp${W}|schluss|bitir${W}|bitti|tamamla${W}`);
 // Zusätzliche Wörter je Bild, damit auch Umschreibungen die richtige Übung finden
 const EX_ALIAS = {
@@ -280,6 +284,19 @@ function trainingIntent(s, { exercises = [], workouts = [], running = false } = 
   const workout = workouts.find((w) => words(w.name).filter((x) => x.length > 2).some((x) => rx(x.replace(/[^\p{L}\d]/gu, "")).test(s)));
   if (STOP.test(s) && (hasTrainWord || running) && !/\d/.test(s)) return { type: "training", action: "stop" };
   if (START.test(s) && (hasTrainWord || workout)) return { type: "training", action: "start", workout: workout ?? null };
+  // "Zeig die Analyse", "Trainingsauswertung", "antrenman analizi"
+  if (ANALYSE.test(s) || (rx(`fortschritt${W}|ilerleme${W}`).test(s) && hasTrainWord)) return { type: "training", action: "analysis" };
+  // "Face Pulls als Nächstes", "Hyperextensions ans Ende", "Face Pull'u öne al"
+  const mv = MOVE_FIRST.test(s) ? "first" : MOVE_LAST.test(s) ? "last" : null;
+  if (mv && running && !/\d/.test(s)) {
+    const exercise = findExercise(s.replace(MOVE_FIRST, " ").replace(MOVE_LAST, " "), exercises);
+    if (exercise) return { type: "training", action: "move", exercise, dir: mv };
+  }
+  // "Face Pulls entfernen", "Hyperextensions weglassen", "Face Pull'u çıkar"
+  if (REMOVE.test(s) && !/\d/.test(s)) {
+    const exercise = findExercise(s.replace(REMOVE, " "), exercises);
+    if (exercise && running) return { type: "training", action: "remove", exercise };
+  }
 
   let sets = null, reps = null, kg = null, m;
   if ((m = s.match(/(\d{1,2})\s*[x×]\s*(\d{1,3})(?!\s*(?:kg|kilo))/iu))) { sets = +m[1]; reps = +m[2]; }
