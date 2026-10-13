@@ -56,12 +56,27 @@
       <button class="round-btn" id="add" aria-label="Neu anlegen" data-i18n-aria>
         <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
       </button>
+      <button class="round-btn burger" id="menu-btn" aria-label="Menü" aria-controls="sidenav" aria-expanded="false" data-i18n-aria>
+        <span></span><span></span><span></span>
+      </button>
     </header>
+
+    <div id="nav-scrim" class="nav-scrim"></div>
+    <aside id="sidenav" class="sidenav" aria-hidden="true">
+      <div class="sidenav-head">
+        <img src="ems-mark.png" alt="" class="avatar">
+        <div><b>Tagesplan</b><div class="muted small">EMS</div></div>
+      </div>
+      <nav id="sidenav-list" class="sidenav-list"></nav>
+    </aside>
 
     <main>
       <div id="view-heute" class="view"></div>
       <div id="view-termine" class="view" hidden></div>
       <div id="view-plan" class="view" hidden></div>
+      <div id="view-training" class="view" hidden></div>
+      <div id="view-einkauf" class="view" hidden></div>
+      <div id="view-vorrat" class="view" hidden></div>
       <div id="view-mehr" class="view" hidden></div>
     </main>
 

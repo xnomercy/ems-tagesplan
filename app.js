@@ -9,7 +9,7 @@ const SUPABASE_URL = "https://hpxdhtuabzqwyslzcmbt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kKiQdntJd893YvBPFx7fhw_FYzlwwtz";
 const DEMO = new URLSearchParams(location.search).has("demo");
 // Bei jeder Veröffentlichung zusammen mit version.json und dem Cache-Namen in sw.js hochzählen
-const APP_VERSION = "23";
+const APP_VERSION = "24";
 const db = DEMO
   ? (await import("./mock.js")).db
   : (await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm")).createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -197,7 +197,11 @@ function render() {
   const h = new Date().getHours();
   $("#greeting").textContent = t(h < 11 ? "Guten Morgen" : h < 17 ? "Hallo" : "Guten Abend") + ", Enes";
   $("#today-date").textContent = new Date().toLocaleDateString(LOCALE(), { weekday: "long", day: "numeric", month: "long" });
-  ({ heute: renderDay, plan: renderPlan, termine: renderTermine, mehr: renderMehr })[state.view]();
+  // Kopf: am Tag die Begrüßung, sonst der Seitenname
+  if (state.view !== "heute") $("#greeting").textContent = t(PAGES[state.view]?.label ?? "");
+  ({ heute: renderDay, plan: renderPlan, termine: renderTermine, mehr: renderMehr, vorrat: renderVorrat,
+    training: () => training.render($("#view-training")), einkauf: () => shopping.render($("#view-einkauf")) })[state.view]();
+  updateNav();
 }
 
 function itemHtml(e, { next = false, showTime = false } = {}) {
@@ -259,12 +263,15 @@ function renderDay() {
   // Einkaufstag (Routine/Termin mit "Einkauf") oder Einkauf ist heute geplant: offene Artikel zeigen
   const shopOpen = shopping.openCount();
   const shopDay = state.entries.some((e) => !e.done && /einkauf|alışveriş|market/i.test(e.title));
+  // Dringendes oder bis morgen Gebrauchtes immer zeigen
+  const pressing = isToday ? shopping.pressing() : [];
+  if (pressing.length && !shopDay) html += `<div class="hint warn">${t("Einkaufen: {x}", { x: pressing.slice(0, 4).map((x) => esc(x.name)).join(", ") + (pressing.length > 4 ? " …" : "") })} <button data-open-shop>${t("Öffnen")}</button></div>`;
   if (shopOpen?.length && shopDay) {
     const byStore = Object.entries(shopOpen.reduce((a, x) => ((a[x.store] = (a[x.store] ?? 0) + 1), a), {}));
     html += `<div class="hint">${t("Einkaufsliste: {n} offen", { n: shopOpen.length })}${byStore.length > 1 ? " (" + byStore.map(([k, n]) => `${t(STORES[k] ?? k)} ${n}`).join(", ") + ")" : ""} <button data-open-shop>${t("Öffnen")}</button></div>`;
   }
   const low = lowSupplies();
-  if (isToday && low.length) html += `<div class="hint warn">${t("Vorrat")}: ${low.map((x) => `${esc(x.name)} ${supplyDays(x) <= 0 ? t("leer") : t("noch {n} Tage", { n: supplyDays(x) })}`).join(", ")} <button data-goto="mehr">${t("Ansehen")}</button></div>`;
+  if (isToday && low.length) html += `<div class="hint warn">${t("Vorrat")}: ${low.map((x) => `${esc(x.name)} ${supplyDays(x) <= 0 ? t("leer") : t("noch {n} Tage", { n: supplyDays(x) })}`).join(", ")} <button data-goto="vorrat">${t("Ansehen")}</button></div>`;
   if (state.settings && state.settings.lat == null) html += `<div class="hint">${t("Für automatische Gebetszeiten einmal den Standort setzen.")} <button data-goto="mehr">${t("Jetzt einrichten")}</button></div>`;
 
   if (timed.length) {
@@ -292,35 +299,13 @@ function setPlanGroup(g) { planGroup = g; try { localStorage.setItem("tagesplan-
 const DAYPARTS = [["morgens", "Morgens"], ["mittags", "Mittags"], ["abends", "Abends"], ["flex", "Ohne feste Uhrzeit"]];
 const daypart = (time) => !time ? "flex" : time < "11:00" ? "morgens" : time < "17:00" ? "mittags" : "abends";
 
-let planTab = "routinen";
-try { planTab = localStorage.getItem("tagesplan-plan-tab") || "routinen"; } catch {}
-function setPlanTab(v) { planTab = v; try { localStorage.setItem("tagesplan-plan-tab", v); } catch {} }
-
 function renderPlan() {
-  const tabs = `<div class="seg plan-tabs" id="plan-tab">
-      <button type="button" data-pt="routinen" class="${planTab === "routinen" ? "on" : ""}">${t("Routinen")}</button>
-      <button type="button" data-pt="training" class="${planTab === "training" ? "on" : ""}">${t("Training")}</button>
-      <button type="button" data-pt="einkauf" class="${planTab === "einkauf" ? "on" : ""}">${t("Einkauf")}</button>
-    </div>`;
-  const bindTabs = () => $("#view-plan").querySelectorAll("#plan-tab button").forEach((b) => (b.onclick = () => { setPlanTab(b.dataset.pt); renderPlan(); window.scrollTo(0, 0); }));
-  if (planTab === "training") {
-    $("#view-plan").innerHTML = tabs + `<div id="training-host"></div>`;
-    bindTabs();
-    training.render($("#training-host"));
-    return;
-  }
-  if (planTab === "einkauf") {
-    $("#view-plan").innerHTML = tabs + `<div id="shop-host"></div>`;
-    bindTabs();
-    shopping.render($("#shop-host"));
-    return;
-  }
   const byTime = planGroup === "zeit";
   const groups = {};
   const timeOf = (r) => routineTime(r, state.pt);
   for (const r of state.routines) (groups[byTime ? daypart(timeOf(r)) : r.category] ??= []).push(r);
   if (byTime) for (const list of Object.values(groups)) list.sort((a, b) => (timeOf(a) ?? "99").localeCompare(timeOf(b) ?? "99"));
-  let html = tabs + `<div class="section-head"><h3>${t("Routinen")}</h3><span class="muted">${t("{n} Einträge", { n: state.routines.length })}</span></div>
+  let html = `<div class="section-head"><h3>${t("Routinen")}</h3><span class="muted">${t("{n} Einträge", { n: state.routines.length })}</span></div>
     <div class="seg" id="group-seg">
       <button type="button" data-g="zeit" class="${byTime ? "on" : ""}">${t("Nach Tageszeit")}</button>
       <button type="button" data-g="bereich" class="${byTime ? "" : "on"}">${t("Nach Bereich")}</button>
@@ -338,7 +323,6 @@ function renderPlan() {
   }
   html += `<button class="primary" id="new-routine">${t("Neue Routine")}</button>`;
   $("#view-plan").innerHTML = html;
-  bindTabs();
   $("#view-plan").querySelectorAll("#group-seg button").forEach((b) => (b.onclick = () => { setPlanGroup(b.dataset.g); renderPlan(); }));
 }
 
@@ -448,10 +432,9 @@ function searchHtml(q) {
   return html + hits.map((i) => `<div class="slot"><div class="t small">${fmtDay(i.on_date, { day: "numeric", month: "numeric", year: "2-digit" })}</div>${itemHtml(toEntry(i), { showTime: true })}</div>`).join("");
 }
 
-function renderMehr() {
-  const s = state.settings ?? {};
-  const feed = `${SUPABASE_URL}/functions/v1/kalender?token=${s.calendar_token}`;
-  $("#view-mehr").innerHTML = `
+// Supplement-Vorrat als eigene Seite
+function renderVorrat() {
+  $("#view-vorrat").innerHTML = `
     <div class="section-head" id="vorrat"><h3>${t("Supplement-Vorrat")}</h3><span class="muted">${t("{n} Einträge", { n: state.supplies.length })}</span></div>
     <div class="card supplies">
       ${state.supplies.length ? state.supplies.map((x) => {
@@ -465,7 +448,17 @@ function renderMehr() {
       ${STACK.filter((n) => !state.supplies.some((x) => x.name.toLowerCase() === n.toLowerCase())).length ? `<p class="small muted" style="margin-top:12px">${t("Aus deinem Stack")}</p>
       <div class="chips">${STACK.filter((n) => !state.supplies.some((x) => x.name.toLowerCase() === n.toLowerCase())).map((n) => `<button type="button" class="chip" data-sup-new="${esc(n)}">+ ${esc(n)}</button>`).join("")}</div>` : ""}
       <button class="btn fill" id="sup-add">${t("Supplement hinzufügen")}</button>
-    </div>
+    </div>`;
+  $("#view-vorrat").querySelectorAll("[data-sup]").forEach((b) => (b.onclick = () => openSupplySheet(state.supplies.find((x) => x.id === b.dataset.sup))));
+  $("#view-vorrat").querySelectorAll("[data-refill]").forEach((b) => (b.onclick = () => openRefill(state.supplies.find((x) => x.id === b.dataset.refill))));
+  $("#view-vorrat").querySelectorAll("[data-sup-new]").forEach((b) => (b.onclick = () => openSupplySheet({ name: b.dataset.supNew })));
+  $("#sup-add").onclick = () => openSupplySheet();
+}
+
+function renderMehr() {
+  const s = state.settings ?? {};
+  const feed = `${SUPABASE_URL}/functions/v1/kalender?token=${s.calendar_token}`;
+  $("#view-mehr").innerHTML = `
     <div class="section-head"><h3>${t("Einstellungen")}</h3></div>
     <div class="card">
       <p class="eyebrow">${t("Sprache")}</p>
@@ -551,10 +544,6 @@ function renderMehr() {
   $("#logout").onclick = () => db.auth.signOut();
   document.querySelectorAll("#theme-seg button").forEach((b) => (b.onclick = () => { setTheme(b.dataset.theme); renderMehr(); }));
   document.querySelectorAll("#lang-seg button").forEach((b) => (b.onclick = () => { setLang(b.dataset.lang); $("#view-termine").innerHTML = ""; render(); saveSettings({ lang: LANG }); }));
-  $("#view-mehr").querySelectorAll("[data-sup]").forEach((b) => (b.onclick = () => openSupplySheet(state.supplies.find((x) => x.id === b.dataset.sup))));
-  $("#view-mehr").querySelectorAll("[data-refill]").forEach((b) => (b.onclick = () => openRefill(state.supplies.find((x) => x.id === b.dataset.refill))));
-  $("#view-mehr").querySelectorAll("[data-sup-new]").forEach((b) => (b.onclick = () => openSupplySheet({ name: b.dataset.supNew })));
-  $("#sup-add").onclick = () => openSupplySheet();
   $("#lock-toggle").onclick = toggleLock;
   $("#export").onclick = exportData;
 }
@@ -698,12 +687,11 @@ async function setItemDone(id, on) {
 const findEntry = (id) => [...state.entries, ...state.open].find((e) => e.id === id) ?? (state.termineCache ?? []).find((e) => e.id === id);
 
 function openTraining(startIt = false) {
-  setPlanTab("training");
-  switchView("plan");
+  switchView("training");
   if (startIt) training.start();
 }
 document.addEventListener("click", (ev) => { if (ev.target.closest("[data-open-training]")) openTraining(); });
-document.addEventListener("click", (ev) => { if (ev.target.closest("[data-open-shop]")) { setPlanTab("einkauf"); switchView("plan"); } });
+document.addEventListener("click", (ev) => { if (ev.target.closest("[data-open-shop]")) switchView("einkauf"); });
 
 document.addEventListener("click", async (ev) => {
   const t = ev.target.closest("[data-toggle],[data-edit-item],[data-edit-routine],[data-day],[data-open-day],[data-goto],[data-detail],#new-routine,#new-item");
@@ -740,10 +728,60 @@ $("#add").onclick = () => openItemSheet();
 $("#greeting").onclick = () => { state.day = new Date(); switchView("heute"); };
 
 document.querySelectorAll(".tabs > button").forEach((b) => (b.onclick = () => switchView(b.dataset.view)));
+
+// ---------- Seitenmenü ----------
+const ICON = {
+  heute: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+  termine: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  plan: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>',
+  training: '<path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/>',
+  einkauf: '<path d="M3 4h2.5l2.2 11.2a1.5 1.5 0 0 0 1.5 1.3h8.6a1.5 1.5 0 0 0 1.5-1.2L21 8H6.3"/><circle cx="9.5" cy="20" r="1.3"/><circle cx="17.5" cy="20" r="1.3"/>',
+  vorrat: '<rect x="7" y="3" width="10" height="4" rx="1"/><path d="M8 7h8v12a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2z"/><path d="M8 12h8"/>',
+  mehr: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+};
+const PAGES = {
+  heute: { label: "Tag" }, termine: { label: "Termine" }, plan: { label: "Routinen" }, training: { label: "Training" },
+  einkauf: { label: "Einkauf" }, vorrat: { label: "Supplement-Vorrat" }, mehr: { label: "Einstellungen" },
+};
+function navCount(k) {
+  if (k === "einkauf") return shopping.openCount()?.length || "";
+  if (k === "vorrat") return lowSupplies().length || "";
+  if (k === "training") return training.active() ? "●" : "";
+  return "";
+}
+function updateNav() {
+  const list = $("#sidenav-list");
+  if (!list) return;
+  list.innerHTML = Object.entries(PAGES).map(([k, p]) => `<button type="button" data-nav="${k}" class="${state.view === k ? "on" : ""}">
+    <svg viewBox="0 0 24 24">${ICON[k]}</svg><span>${t(p.label)}</span>${navCount(k) ? `<em class="${k === "vorrat" ? "warn" : ""}">${navCount(k)}</em>` : ""}</button>`).join("");
+  list.querySelectorAll("[data-nav]").forEach((b) => (b.onclick = () => switchView(b.dataset.nav)));
+}
+function openNav() {
+  updateNav();
+  document.body.classList.add("nav-open");
+  $("#sidenav").setAttribute("aria-hidden", "false");
+  $("#menu-btn").setAttribute("aria-expanded", "true");
+}
+function closeNav() {
+  if (!document.body.classList.contains("nav-open")) return;
+  document.body.classList.remove("nav-open");
+  $("#sidenav").setAttribute("aria-hidden", "true");
+  $("#menu-btn").setAttribute("aria-expanded", "false");
+}
+$("#menu-btn").onclick = () => (document.body.classList.contains("nav-open") ? closeNav() : openNav());
+$("#nav-scrim").onclick = closeNav;
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeNav(); });
+// Nach rechts wischen schließt das Menü
+{
+  let x0 = null;
+  $("#sidenav").addEventListener("touchstart", (e) => { x0 = e.touches[0].clientX; }, { passive: true });
+  $("#sidenav").addEventListener("touchend", (e) => { if (x0 != null && e.changedTouches[0].clientX - x0 > 60) closeNav(); x0 = null; });
+}
 function switchView(v) {
   state.view = v;
   document.querySelectorAll(".tabs > button").forEach((b) => b.classList.toggle("active", b.dataset.view === v));
-  for (const name of ["heute", "plan", "termine", "mehr"]) $(`#view-${name}`).hidden = name !== v;
+  for (const name of Object.keys(PAGES)) $(`#view-${name}`).hidden = name !== v;
+  closeNav();
   window.scrollTo(0, 0);
   refresh();
 }
@@ -1078,9 +1116,11 @@ const training = createTraining({
 
 // ---------- Einkauf ----------
 const shopping = createShopping({
-  db, t, esc, $, toast, openSheet, closeSheet, sheet, form, LOCALE,
+  db, t, esc, $, toast, openSheet, closeSheet, sheet, form, LOCALE, fmtDay,
+  enhancePickers: (f) => enhancePickers(f),
   lowSupplies: () => lowSupplies(), supplyDays: (x) => supplyDays(x),
   onChange: () => { if (state.view === "heute") renderDay(); },
+  onPlanned: () => { state.upcoming = null; refresh(); },
 });
 
 // ---------- Sprache ----------
@@ -1184,13 +1224,16 @@ function describe(cmd) {
   if (cmd.type === "sprache") return [t("Sprache"), cmd.lang === "tr" ? "Türkçe" : "Deutsch"];
   if (cmd.type === "theme") return [t("Darstellung"), t({ auto: "Automatisch", light: "Hell", dark: "Dunkel" }[cmd.theme])];
   if (cmd.type === "gruppe") return [t("Routinen"), t(cmd.g === "zeit" ? "Nach Tageszeit" : "Nach Bereich")];
-  if (cmd.type === "zeige") return [t("Anzeigen"), cmd.date ? fmtDay(cmd.date, { weekday: "long", day: "numeric", month: "long" }) : t({ heute: "Tag", termine: "Termine", plan: "Routinen", mehr: "Einstellungen", monat: "Monat", verlauf: "Verlauf", vorrat: "Supplement-Vorrat" }[cmd.view])];
+  if (cmd.type === "zeige") return [t("Anzeigen"), cmd.date ? fmtDay(cmd.date, { weekday: "long", day: "numeric", month: "long" }) : t({ heute: "Tag", termine: "Termine", plan: "Routinen", mehr: "Einstellungen", monat: "Monat", verlauf: "Verlauf", vorrat: "Supplement-Vorrat", training: "Training", einkauf: "Einkaufsliste" }[cmd.view])];
   if (cmd.type === "suche") return [t("Suche"), cmd.q];
   if (cmd.type === "einkauf") {
     const names = (cmd.items ?? []).map((x) => x.name + (x.qty ? ` (${x.qty})` : "")).join(", ");
     if (cmd.action === "show") return [t("Anzeigen"), t("Einkaufsliste")];
+    if (cmd.action === "share") return [t("Teilen"), t("Einkaufsliste")];
+    if (cmd.action === "budget") return [t("Budget für Einkäufe"), cmd.amount.toLocaleString(LOCALE(), { style: "currency", currency: "EUR" })];
     if (cmd.action === "finish") return [t("Einkauf abschließen"), cmd.amount != null ? cmd.amount.toLocaleString(LOCALE(), { style: "currency", currency: "EUR" }) : t("ohne Betrag")];
-    return [t({ add: "Auf die Einkaufsliste", check: "Im Wagen", remove: "Von der Liste streichen" }[cmd.action]), names];
+    const by = cmd.items?.[0]?.need_by ? " · " + t("bis {d}", { d: fmtDay(cmd.items[0].need_by, { weekday: "short" }) }) : "";
+    return [t({ add: "Auf die Einkaufsliste", check: "Im Wagen", remove: "Von der Liste streichen" }[cmd.action]), (cmd.items?.some((x) => x.urgent) ? "❗ " : "") + names + by];
   }
   if (cmd.type === "training") {
     if (cmd.action === "start") return [t("Training"), t("Starten") + (cmd.workout ? ": " + cmd.workout.name : "")];
@@ -1312,21 +1355,19 @@ async function runIntent(c) {
     case "zeige":
       if (c.date) state.day = new Date(c.date + "T12:00");
       if (c.view === "monat" || c.view === "verlauf") { state.termMode = c.view === "monat" ? "monat" : "verlauf"; state.search = ""; return switchView("termine"); }
-      if (c.view === "vorrat") { switchView("mehr"); return setTimeout(() => $("#vorrat")?.scrollIntoView({ behavior: "smooth" }), 300); }
+
       if (c.view === "termine") state.termMode = "liste";
       return switchView(c.view);
     case "training": {
-      setPlanTab("training");
-      if (state.view !== "plan") switchView("plan");
+      if (state.view !== "training") switchView("training");
       const msg = await training.runVoice(c);
       if (msg) toast(msg);
       return;
     }
     case "einkauf": {
-      setPlanTab("einkauf");
-      if (state.view !== "plan") switchView("plan"); else renderPlan();
+      if (state.view !== "einkauf") switchView("einkauf");
       const r = await shopping.runVoice(c);
-      if (r?.msg) toast(r.msg, r.undo ? async () => { await r.undo(); renderPlan(); } : null);
+      if (r?.msg) toast(r.msg, r.undo ? async () => { await r.undo(); render(); } : null);
       return;
     }
     case "suche":
@@ -1504,7 +1545,7 @@ const HELP = {
     ["Ändern", ["Verschiebe Zahnarzt auf Freitag um 10", "Mach Steuer wichtig", "Pausiere Retinol", "Erinnere mich 30 Minuten vorher an Zahnarzt", "Füge Milch zur Einkaufsliste hinzu", "Lösche den Termin Zahnarzt"]],
     ["Anzeigen", ["Was steht morgen an", "Zeig mir die Termine", "Zeig den Monat", "Was habe ich erledigt", "Suche Zahnarzt", "Teile die Routinen nach Tageszeit auf", "Öffne die Einstellungen"]],
     ["Training", ["Starte Training", "Starte Brusttraining", "Starte Beintag", "Hammer Curls 14 kg 12 Wiederholungen", "Latziehen breit 50 kg 12 Wiederholungen", "3x12 mit 30 kg Seil nach unten", "40 kg 10 mal", "Seitstütz 45 Sekunden", "Laufband 10 Minuten Steigung 10", "Latziehen 50 kg 10 Wiederholungen 2 übrig", "Gewicht 99,5", "Bauchumfang 104", "Face Pulls entfernen", "Face Pulls als Nächstes", "Hyperextensions ans Ende", "Zeig die Analyse", "Training beenden", "Training fortsetzen"]],
-    ["Einkauf", ["Milch, 6 Eier und 500 g Hack auf die Einkaufsliste", "Wir brauchen Brot", "Milch gekauft", "Streich Skyr von der Einkaufsliste", "Was muss ich einkaufen", "Einkauf abschließen 45 Euro"]],
+    ["Einkauf", ["Milch, 6 Eier und 500 g Hack auf die Einkaufsliste", "Wir brauchen Brot", "Milch gekauft", "Streich Skyr von der Einkaufsliste", "Was muss ich einkaufen", "Einkauf abschließen 45 Euro", "Dringend Brot auf die Einkaufsliste", "Milch bis Samstag auf die Einkaufsliste", "Einkaufsbudget 400 Euro", "Einkaufsliste teilen", "Öffne Einkauf"]],
     ["Vorrat", ["Magnesium aufgefüllt 60", "Noch 40 Ashwagandha", "Wie lange reicht Magnesium", "Zeig den Vorrat"]],
     ["Einstellungen", ["Sprich Türkisch", "Dunkler Modus", "Heller Modus"]],
   ],
@@ -1514,7 +1555,7 @@ const HELP = {
     ["Değiştir", ["Diş doktorunu cumaya ertele", "Vergi önemli", "Retinol'ü durdur", "Diş doktoru için 1 saat önce hatırlat", "Alışveriş listesine süt ekle", "Diş doktoru randevusunu sil"]],
     ["Göster", ["Yarın neler var", "Randevuları göster", "Aylık görünüm", "Geçmişi göster", "Diş doktoru bul", "Rutinleri vakte göre sırala", "Ayarları aç"]],
     ["Antrenman", ["Antrenmana başla", "Göğüs antrenmanını başlat", "Bacak omuz antrenmanını başlat", "Çekiç curl 14 kilo 12 tekrar", "Lat çekme geniş 50 kilo 12 tekrar", "Triseps halat aşağı 3 set 12 tekrar 30 kilo", "Koşu bandı 10 dakika eğim 10", "Lat çekme 50 kilo 10 tekrar 2 yedek", "Kilom 99,5", "Bel çevresi 104", "Face Pull çıkar", "Face Pull'u öne al", "Hiperekstansiyonu sona al", "Antrenman analizi", "Antrenmanı bitir", "Antrenmana devam et"]],
-    ["Alışveriş", ["Alışveriş listesine süt ve yumurta ekle", "Ekmek lazım", "Süt aldım", "Alışveriş listesinden sütü sil", "Alışveriş listesini göster", "Alışverişi bitir 45 euro"]],
+    ["Alışveriş", ["Alışveriş listesine süt ve yumurta ekle", "Ekmek lazım", "Süt aldım", "Alışveriş listesinden sütü sil", "Alışveriş listesini göster", "Alışverişi bitir 45 euro", "Acil ekmek lazım", "Alışveriş listesine cumartesiye kadar süt ekle", "Alışveriş bütçesi 400", "Alışveriş listesini paylaş"]],
     ["Stok", ["Magnezyum doldurdum 60", "40 tane ashwagandha kaldı", "Magnezyum ne kadar yeter", "Stoku göster"]],
     ["Ayarlar", ["Almancaya geç", "Koyu mod", "Açık mod"]],
   ],

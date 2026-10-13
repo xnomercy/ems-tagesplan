@@ -34,6 +34,8 @@ const VIEW_WORDS = [
   ["vorrat", rx(`vorr(?:a|ä)t${W}|supplement${W}|stok${W}|takviye${W}`)],
   ["termine", rx(`termine|aufgaben|kalender|randevu${W}|görev${W}|takvim${W}`)],
   ["plan", rx(`routinen|rutin${W}`)],
+  ["einkauf", rx(`einkauf${W}|alışveriş${W}`)],
+  ["training", rx(`training${W}|trainingsseite|antrenman${W}`)],
   ["mehr", rx(`einstellung${W}|mehr|ayar${W}`)],
   ["heute", rx(`tag|tagesplan|heute|bugün${W}|gün${W}|program${W}`)],
 ];
@@ -316,6 +318,7 @@ export function findExercise(s, exercises = []) {
 const LISTW = `(?:einkaufs?liste|einkaufszettel|alışveriş listesi\\p{L}*|market listesi\\p{L}*)`;
 const DATEW = /(?<!\p{L})(heute|morgen|übermorgen|bis|am|um|uhr|montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|woche|nächst\p{L}*|yarın|bugün|saat|pazartesi|salı|çarşamba|perşembe|cuma|cumartesi|pazar|hafta)(?!\p{L})|\d{1,2}[.:]\d{2}/iu;
 const SHOP_FILL = /(?<!\p{L})(?:bitte|noch|mal|auch|wir|ich|uns|mir|brauchen|brauche|müssen|muss|kaufen|kaufe|kauf|einkaufen|lazım|gerek|almam|almamız|al|alalım)(?!\p{L})/giu;
+const isoD = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const cleanShop = (x) => x.replace(SHOP_FILL, " ").replace(/\s+/g, " ").trim();
 
 function shopIntent(text, s, open, isNew = false) {
@@ -328,6 +331,13 @@ function shopIntent(text, s, open, isNew = false) {
     const m = raw.match(/(\d+(?:[.,]\d{1,2})?)\s*(?:€|euro|eur|avro)?/i);
     return { type: "einkauf", action: "finish", items: [], amount: m ? Number(m[1].replace(",", ".")) : null };
   }
+  // Budget: "Einkaufsbudget 400 Euro", "alışveriş bütçesi 400"
+  if (rx(`einkaufsbudget|budget\\s+(?:für\\s+)?(?:den\\s+)?einkauf\\p{L}*|alışveriş\\s+bütçe\\p{L}*|market\\s+bütçe\\p{L}*`).test(s)) {
+    const n = raw.match(/(\d+(?:[.,]\d{1,2})?)/);
+    if (n) return { type: "einkauf", action: "budget", items: [], amount: Number(n[1].replace(",", ".")) };
+  }
+  // Teilen: "Einkaufsliste teilen", "alışveriş listesini paylaş"
+  if (hasList && rx(`teil\\p{L}*|schick\\p{L}*|send\\p{L}*|paylaş\\p{L}*|gönder\\p{L}*`).test(s)) return { type: "einkauf", action: "share", items: [] };
   // Streichen
   let m = raw.match(new RegExp(`^(?:streich\\p{L}*|lösch\\p{L}*|entfern\\p{L}*|nimm)\\s+(.+?)\\s+(?:von|aus)\\s+(?:der\\s+|dem\\s+)?${LISTW}(?:\\s+(?:runter|raus))?$`, "iu"))
     ?? raw.match(new RegExp(`^${LISTW}\\p{L}*\\s+(.+?)\\s+(?:sil|çıkar)\\p{L}*$`, "iu"))
@@ -337,7 +347,18 @@ function shopIntent(text, s, open, isNew = false) {
   m = raw.match(new RegExp(`^(?:füg\\p{L}*|setz\\p{L}*|pack\\p{L}*|schreib\\p{L}*|tu\\p{L}*)?\\s*(.+?)\\s+(?:zur|zum|auf\\s+die|auf\\s+den|auf|in\\s+die)\\s+${LISTW}(?:\\s+(?:hinzu|dazu|drauf|rauf|rein|setzen|schreiben))?$`, "iu"))
     ?? raw.match(new RegExp(`^${LISTW}\\s*:?\\s+(.+?)(?:\\s+(?:ekle|yaz)\\p{L}*)?$`, "iu"))
     ?? raw.match(new RegExp(`^(.+?)\\s+${LISTW}\\s+(?:ekle|yaz)\\p{L}*$`, "iu"));
-  if (m) return { type: "einkauf", action: "add", items: parseItems(cleanShop(m[1])) };
+  if (m) {
+    // "Milch bis Samstag auf die Einkaufsliste" / "cumartesiye kadar süt"
+    let text1 = m[1], need_by = null;
+    const by = text1.match(/\s*(?:(?<!\p{L})bis\s+(?:zum\s+|zur\s+|nächsten?\s+)?(\p{L}+|\d{1,2}\.\d{1,2}\.?)|(\p{L}+?)(?:'?(?:y?e|y?a))?\s+kadar)\s*/iu);
+    if (by) {
+      const w = by[1] ?? by[2];
+      const d = [parseDate(w, new Date()), parseDateTr(w, new Date())].find((x) => x?.hit);
+      if (d) { need_by = isoD(d.date); text1 = text1.replace(by[0], " "); }
+    }
+    const items = parseItems(cleanShop(text1)).map((x) => (need_by ? { ...x, need_by } : x));
+    return { type: "einkauf", action: "add", items };
+  }
   if (hasList) return null;
   // Abhaken, nur wenn der Artikel auf der Liste steht
   m = raw.match(/^(.+?)\s+(?:gekauft|ist im wagen|im wagen|hab ich|habe ich|aldım|aldık|sepette)$/iu);
