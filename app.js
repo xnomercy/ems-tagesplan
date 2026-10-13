@@ -9,7 +9,7 @@ const SUPABASE_URL = "https://hpxdhtuabzqwyslzcmbt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kKiQdntJd893YvBPFx7fhw_FYzlwwtz";
 const DEMO = new URLSearchParams(location.search).has("demo");
 // Bei jeder Veröffentlichung zusammen mit version.json und dem Cache-Namen in sw.js hochzählen
-const APP_VERSION = "24";
+const APP_VERSION = "25";
 const db = DEMO
   ? (await import("./mock.js")).db
   : (await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm")).createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -1024,7 +1024,7 @@ function openRoutineSheet(r = {}) {
 // Ersetzt input[type=date|time] durch einen Knopf; der Wert bleibt in einem versteckten Feld mit gleichem Namen.
 const picker = $("#picker"), pbody = $("#picker-body");
 const fmtPick = (input) => input.dataset.kind === "date"
-  ? fmtDay(input.value, { weekday: "short", day: "numeric", month: "long", year: input.value.slice(0, 4) === String(new Date().getFullYear()) ? undefined : "numeric" })
+  ? !input.value ? t("Kein Datum") : fmtDay(input.value, { weekday: "short", day: "numeric", month: "long", year: input.value.slice(0, 4) === String(new Date().getFullYear()) ? undefined : "numeric" })
   : input.value || "–:–";
 
 function enhancePickers(root) {
@@ -1057,7 +1057,7 @@ function pickDate(input, done) {
     }
     const quick = [["Heute", 0], ["Morgen", 1], ["Übermorgen", 2], ["Nächste Woche", 7]];
     pbody.innerHTML = `<h3>${t("Datum wählen")}</h3>
-      <div class="chips quick">${quick.map(([n, k]) => `<button type="button" class="chip" data-iso="${isoDate(addDays(today, k))}">${t(n)}</button>`).join("")}</div>
+      <div class="chips quick">${quick.map(([n, k]) => `<button type="button" class="chip" data-iso="${isoDate(addDays(today, k))}">${t(n)}</button>`).join("")}${input.value && !input.required ? `<button type="button" class="chip" data-iso="">${t("Kein Datum")}</button>` : ""}</div>
       <div class="cal-head">
         <button type="button" class="cal-nav" data-m="-1" aria-label="‹">‹</button>
         <b>${view.toLocaleDateString(LOCALE(), { month: "long", year: "numeric" })}</b>

@@ -163,6 +163,20 @@ export function createShopping(ctx) {
   // Eigene Läden: Standard plus alle, die schon benutzt wurden
   const allStores = () => [...new Set([...Object.keys(STORES), ...S.items.map((x) => x.store).filter(Boolean)])];
   const lbl = (k) => storeLabel(k, t);
+  // Bekannte Namen für Vorschläge beim Tippen: eigene Historie zuerst, dann Grundliste
+  const namePool = () => {
+    const seen = new Map();
+    for (const x of S.items) if (!seen.has(normName(x.name))) seen.set(normName(x.name), x.name);
+    for (const n of BASICS) { const v = t(n); if (!seen.has(normName(v))) seen.set(normName(v), v); }
+    return [...seen.values()];
+  };
+  const matchNames = (q, skip = []) => {
+    const n = normName(q);
+    if (n.length < 2) return [];
+    const skipN = new Set(skip.map(normName));
+    const pool = namePool().filter((x) => !skipN.has(normName(x)) && normName(x) !== n);
+    return [...pool.filter((x) => normName(x).startsWith(n)), ...pool.filter((x) => !normName(x).startsWith(n) && normName(x).includes(n))].slice(0, 6);
+  };
 
   function load(force = false) {
     if (S.loaded && !force) return Promise.resolve();
@@ -199,7 +213,7 @@ export function createShopping(ctx) {
         merged.push(same.name); continue;
       }
       const prev = remembered(p.name);
-      const category = prev?.category ?? classify(p.name);
+      const category = p.category ?? prev?.category ?? classify(p.name);
       const row = { list_id: S.list.id, name: p.name, qty: p.qty ?? prev?.qty ?? null, category, store: p.store ?? prev?.store ?? storeFor(category), flag: halalFlag(p.name), note: p.note ?? null,
         price: p.price ?? prev?.price ?? null, urgent: !!p.urgent, need_by: p.need_by ?? null, every_days: p.every_days ?? prev?.every_days ?? null };
       const { data, error } = await db.from("shopping_items").insert(row).select().single();
@@ -327,7 +341,10 @@ export function createShopping(ctx) {
         ${(S.store === "alle" && x.store !== "supermarkt") || x.note || x.flag || x.urgent || x.need_by ? `<span class="sub">${x.urgent ? `<span class="shop-flag haram">${t("dringend")}</span> ` : ""}${x.need_by && !x.done ? `<span class="shop-flag ${x.need_by <= today ? "haram" : ""}">${t("bis {d}", { d: x.need_by === today ? t("heute") : fmtDay(x.need_by, { weekday: "short" }) })}</span> ` : ""}${S.store === "alle" && x.store !== "supermarkt" ? `<b>${esc(lbl(x.store))}</b>` : ""}${x.note ? " " + esc(x.note) : ""} ${flagHtml(x)}</span>` : ""}</button>
         ${x.price != null ? `<span class="shop-price">${eur(x.price)}</span>` : ""}
       </div>`;
-    let html = `<form class="shop-add" id="shop-add" autocomplete="off"><input id="shop-in" placeholder="${t("Was fehlt? z. B. Milch, 6 Eier, 500 g Hack")}" enterkeyhint="done"><button class="primary" aria-label="${t("Hinzufügen")}">+</button></form>`;
+    let html = `<form class="shop-add" id="shop-add" autocomplete="off"><input id="shop-in" placeholder="${t("Was fehlt? z. B. Milch, 6 Eier, 500 g Hack")}" enterkeyhint="done">
+      <button type="button" class="round-btn shop-more" id="shop-more" aria-label="${t("Mit Details anlegen")}"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
+      <button class="primary" aria-label="${t("Hinzufügen")}">+</button></form>
+      <div class="chips shop-ac" id="shop-ac" hidden></div>`;
     if (stores.length > 1) html += `<div class="chips shop-stores"><button type="button" class="chip ${S.store === "alle" ? "on" : ""}" data-store="alle">${t("Alle")} ${all.filter((x) => !x.done).length}</button>${stores.map((k) => `<button type="button" class="chip ${S.store === k ? "on" : ""}" data-store="${esc(k)}">${esc(lbl(k))} ${all.filter((x) => x.store === k && !x.done).length}</button>`).join("")}</div>`;
     if (todo.length) html += `<div class="shop-tools"><span class="small muted">${priced ? t("ca. {x}", { x: eur(est) }) + (priced < todo.length ? " · " + t("{n} ohne Preis", { n: todo.length - priced }) : "") : t("{n} Artikel offen", { n: todo.length })}</span>
       <button type="button" class="link-btn" id="shop-plan">${t("Einkauf planen")}</button><button type="button" class="link-btn" id="shop-share">${t("Teilen")}</button></div>`;
@@ -353,6 +370,24 @@ export function createShopping(ctx) {
     host.innerHTML = html;
 
     const byId = (id) => S.items.find((x) => x.id === id);
+    // Vorschläge beim Tippen: ergänzt das letzte Wort nach Komma oder "und"
+    const inp = host.querySelector("#shop-in"), ac = host.querySelector("#shop-ac");
+    const lastPart = (v) => v.split(/\s*(?:,|;|\+|\bund\b|\bve\b)\s*/i).pop();
+    inp.oninput = () => {
+      const part = lastPart(inp.value).replace(/^\d+([.,]\d+)?\s*\p{L}{0,6}\s+/u, "");
+      const list = matchNames(part, openItems().map((x) => x.name));
+      ac.hidden = !list.length;
+      ac.innerHTML = list.map((n) => `<button type="button" class="chip" data-ac="${esc(n)}">${esc(n)}</button>`).join("");
+      ac.querySelectorAll("[data-ac]").forEach((b) => (b.onclick = () => {
+        const v = inp.value, lp = lastPart(v), qty = lp.match(/^\d+([.,]\d+)?\s*\p{L}{0,6}\s+/u)?.[0] ?? "";
+        inp.value = v.slice(0, v.length - lp.length) + qty + b.dataset.ac;
+        ac.hidden = true; inp.focus();
+      }));
+    };
+    host.querySelector("#shop-more").onclick = () => {
+      const p = parseOne(lastPart(inp.value) || "") ?? {};
+      openEdit({ name: p.name ?? "", qty: p.qty ?? null, urgent: !!p.urgent });
+    };
     host.querySelector("#shop-add").onsubmit = async (e) => {
       e.preventDefault();
       const v = $("#shop-in").value.trim();
@@ -382,13 +417,19 @@ export function createShopping(ctx) {
 
   function openEdit(x) {
     if (!x) return;
-    const v = { store: x.store, urgent: !!x.urgent };
+    const isNew = !x.id;
+    // Neu: Laden und Gang aus der Historie oder per Stichwort, solange nicht von Hand gewählt
+    const guess = (name) => { const prev = remembered(name); const cat = prev?.category ?? classify(name); return { prev, category: cat, store: prev?.store ?? storeFor(cat) }; };
+    const g0 = isNew && x.name ? guess(x.name) : null;
+    if (isNew) Object.assign(x, { category: g0?.category ?? "sonstiges", store: g0?.store ?? "supermarkt", qty: x.qty ?? g0?.prev?.qty ?? null, price: g0?.prev?.price ?? null, every_days: g0?.prev?.every_days ?? null });
+    const v = { store: x.store, urgent: !!x.urgent, touched: !isNew };
     const opts = (o, cur) => Object.entries(o).map(([k, l]) => `<option value="${k}" ${k === cur ? "selected" : ""}>${esc(t(l))}</option>`).join("");
     const keep = () => Object.fromEntries([...new FormData(form)].map(([k, val]) => [k, val]));
     const draw = (f = {}) => {
       const val = (k, d) => esc(f[k] ?? d ?? "");
-      form.innerHTML = `<h3>${t("Artikel")}</h3>
-        <label>${t("Name")}</label><input name="name" value="${val("name", x.name)}" required>
+      form.innerHTML = `<h3>${t(isNew ? "Neuer Artikel" : "Artikel")}</h3>
+        <label>${t("Name")}</label><input name="name" value="${val("name", x.name)}" required autocomplete="off" ${isNew ? "autofocus" : ""}>
+        <div class="chips shop-ac" id="es-ac" hidden></div><p class="small" id="es-flag"></p>
         <div class="row2"><div><label>${t("Menge")}</label><input name="qty" value="${val("qty", x.qty)}" placeholder="${t("z. B. 2 l, 500 g, 6")}"></div>
         <div><label>${t("Preis (€)")}</label><input name="price" inputmode="decimal" value="${val("price", x.price != null ? String(x.price).replace(".", ",") : "")}" placeholder="${t("z. B. 1,29")}"></div></div>
         <label>${t("Laden")}</label>${storeChips(v.store, "data-es")}
@@ -397,12 +438,36 @@ export function createShopping(ctx) {
         <label>${t("Gebraucht bis (optional)")}</label><input type="date" name="need_by" value="${val("need_by", x.need_by)}">
         <label>${t("Regelmäßig kaufen")}</label><select name="every_days">${[["", "Automatisch (aus deinem Rhythmus)"], ["3", "alle 3 Tage"], ["5", "alle 5 Tage"], ["7", "jede Woche"], ["10", "alle 10 Tage"], ["14", "alle 2 Wochen"], ["30", "jeden Monat"]].map(([k, l]) => `<option value="${k}" ${String(f.every_days ?? x.every_days ?? "") === k ? "selected" : ""}>${t(l)}</option>`).join("")}</select>
         <label>${t("Notiz")}</label><input name="note" value="${val("note", x.note)}" placeholder="${t("z. B. laktosefrei, Marke")}">
-        <div class="sheet-actions"><button class="primary" value="save">${t("Speichern")}</button></div>
-        <button type="button" class="ghost danger" id="shop-del">${t("Von der Liste streichen")}</button>`;
+        <div class="sheet-actions"><button class="primary" value="save">${t(isNew ? "Hinzufügen" : "Speichern")}</button></div>
+        ${isNew ? "" : `<button type="button" class="ghost danger" id="shop-del">${t("Von der Liste streichen")}</button>`}`;
       enhancePickers?.(form);
-      bindStoreChips("data-es", () => v.store, (k) => (v.store = k), () => draw(keep()));
+      bindStoreChips("data-es", () => v.store, (k) => { v.store = k; v.touched = true; }, () => draw(keep()));
+      form.category.onchange = () => (v.touched = true);
+      // Name: Vorschläge, Halal-Hinweis, Laden/Gang mitdenken
+      const nameIn = form.name, acEl = form.querySelector("#es-ac"), flagEl = form.querySelector("#es-flag");
+      const paintFlag = () => {
+        const fl = halalFlag(nameIn.value);
+        flagEl.innerHTML = fl ? `<span class="shop-flag ${fl.split(":")[0]}">${fl.startsWith("haram:") ? t("nicht halal: {x}", { x: t(fl.slice(6)) }) : t(fl.slice(6))}</span>` : "";
+      };
+      const applyGuess = () => {
+        if (!isNew || v.touched || !nameIn.value.trim()) return;
+        const gg = guess(nameIn.value.trim());
+        form.category.value = gg.category;
+        if (gg.prev?.price != null && !form.price.value) form.price.value = String(gg.prev.price).replace(".", ",");
+        if (gg.prev?.qty && !form.qty.value) form.qty.value = gg.prev.qty;
+        if (gg.store !== v.store) { v.store = gg.store; const k = keep(); draw(k); form.name.focus(); form.name.setSelectionRange(k.name.length, k.name.length); }
+      };
+      nameIn.oninput = () => {
+        paintFlag();
+        const list = matchNames(nameIn.value, isNew ? openItems().map((y) => y.name) : []);
+        acEl.hidden = !list.length;
+        acEl.innerHTML = list.map((n) => `<button type="button" class="chip" data-eac="${esc(n)}">${esc(n)}</button>`).join("");
+        acEl.querySelectorAll("[data-eac]").forEach((b) => (b.onclick = () => { nameIn.value = b.dataset.eac; acEl.hidden = true; paintFlag(); applyGuess(); }));
+      };
+      nameIn.onchange = applyGuess;
+      paintFlag();
       $("#es-urgent").onclick = () => { v.urgent = !v.urgent; draw(keep()); };
-      $("#shop-del").onclick = async () => {
+      if (!isNew) $("#shop-del").onclick = async () => {
         const copy = { ...x };
         await remove(x); closeSheet(sheet);
         toast(t("Gestrichen: {x}", { x: x.name }), async () => { const { id, ...row } = copy; const { data } = await db.from("shopping_items").insert(row).select().single(); if (data) S.items.unshift(data); rerender(); });
@@ -415,6 +480,16 @@ export function createShopping(ctx) {
       const name = f.get("name").trim();
       const patch = { name, qty: f.get("qty").trim() || null, price: num(f.get("price")), store: v.store, category: f.get("category"), urgent: v.urgent,
         need_by: f.get("need_by") || null, every_days: Number(f.get("every_days")) || null, note: f.get("note").trim() || null, flag: halalFlag(name) };
+      if (isNew) {
+        if (!name) return;
+        closeSheet(sheet);
+        const { flag, ...p } = patch;
+        const res = await add([{ ...p, name: name.charAt(0).toLocaleUpperCase("de-DE") + name.slice(1) }]);
+        const inQuick = S.host?.querySelector("#shop-in");
+        if (inQuick) inQuick.value = "";
+        if (res.msg) toast(res.msg, res.undo ? async () => { await res.undo(); rerender(); } : null);
+        return;
+      }
       const { error } = await db.from("shopping_items").update(patch).eq("id", x.id);
       if (error) return toast(error.message);
       Object.assign(x, patch);
