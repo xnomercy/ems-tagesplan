@@ -1,5 +1,7 @@
 // Fristen und Verträge: TÜV, Versicherungen, Kündigungsfristen, Ausweise.
 // Jede Frist legt eine wichtige Aufgabe zum Erinnerungsdatum an, damit Mitteilung und Kalender sie kennen.
+// Doppeltes Tippen während des Speicherns ignorieren
+const lock = (fn) => { let busy = false; return async (...a) => { a[0]?.preventDefault?.(); if (busy) return; busy = true; try { return await fn(...a); } finally { busy = false; } }; };
 export const KINDS = {
   tuev: { label: "TÜV / HU", repeat: 2, lead: 30, notice: null, task: "TÜV-Termin machen: {x}" },
   versicherung: { label: "Versicherung", repeat: 1, lead: 14, notice: 1, task: "Versicherung prüfen oder kündigen: {x}" },
@@ -174,8 +176,7 @@ export function createDeadlines(ctx) {
       form.querySelector("#dl-del")?.addEventListener("click", async () => { closeSheet(sheet); await remove(d); toast(t("Gelöscht: {x}", { x: d.title })); ctx.onChange(); });
     };
     draw();
-    form.onsubmit = async (e) => {
-      e.preventDefault();
+    form.onsubmit = lock(async (e) => {
       const f = new FormData(form);
       if (!f.get("due")) return toast(t("Bitte ein Datum wählen"));
       const r = await save({ ...d, kind: v.kind, title: f.get("title").trim(), due_date: f.get("due"), notice_months: Number(f.get("notice")) || null, lead_days: Number(f.get("lead")), repeat_years: Number(f.get("repeat")) || null, notes: f.get("notes").trim() || null });
@@ -183,7 +184,7 @@ export function createDeadlines(ctx) {
       closeSheet(sheet);
       toast(t("Frist gespeichert. Erinnerung am {d}", { d: fmtDay([remindDate(r.data), today()].sort()[1], { day: "numeric", month: "long", year: "numeric" }) }));
       ctx.onChange();
-    };
+    });
     openSheet(sheet);
   }
 

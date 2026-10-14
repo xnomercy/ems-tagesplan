@@ -136,7 +136,7 @@ export function createTraining(ctx) {
       db.from("body_metrics").select("*").order("on_date", { ascending: false }).limit(200),
     ]);
     T.body = bm.data ?? [];
-    if (e.error) return toast(e.error.message);
+    if (e.error) { T.failed = e.error.message; return; }
     T.exercises = e.data ?? []; T.workouts = w.data ?? []; T.sessions = s.data ?? []; T.sets = x.data ?? [];
     T.loaded = true;
     if (!T.exercises.length && !T.workouts.length) await seed();
@@ -241,6 +241,11 @@ export function createTraining(ctx) {
       if (!el || !run) return clearInterval(elapsedTimer);
       el.textContent = t("Dauer {x}", { x: fmtDur(Math.max(0, Math.round((Date.now() - Date.parse(run.started_at)) / 60000))) });
     }, 20000);
+    if (!T.loaded && T.failed) {
+      host.innerHTML = `<div class="empty">${esc(t("Laden fehlgeschlagen: {x}", { x: T.failed }))}<button type="button" class="primary" id="tr-retry">${t("Nochmal versuchen")}</button></div>`;
+      host.querySelector("#tr-retry").onclick = () => { T.failed = null; render(host); };
+      return;
+    }
     if (!T.loaded) { host.innerHTML = `<div class="empty">${t("Lade …")}</div>`; load().then(() => render(host)); return; }
     const run = active();
     host.innerHTML = run ? runHtml(run) : homeHtml();
@@ -365,11 +370,17 @@ export function createTraining(ctx) {
     return html;
   }
 
-  async function start(workoutId, quietStart = false) {
+  let starting = false;
+  async function start(...a) {
+    if (starting) return;
+    starting = true;
+    try { return await startNow(...a); } finally { starting = false; }
+  }
+  async function startNow(workoutId, quietStart = false) {
     await load();
     if (active()) return rerender();
     const w = T.workouts.find((x) => x.id === workoutId) ?? T.workouts[0];
-    const { data, error } = await db.from("workout_sessions").insert({ workout_id: w?.id ?? null, name: w?.name ?? t("Training") }).select().single();
+    const { data, error } = await db.from("workout_sessions").insert({ workout_id: w?.id ?? null, name: w?.name ?? t("Training"), started_at: new Date().toISOString() }).select().single();
     if (error) return toast(error.message);
     T.sessions.unshift(data);
     T.draft = {}; T.extraRows = {};
@@ -436,7 +447,13 @@ export function createTraining(ctx) {
     return data;
   }
 
-  async function logSet(exId, vals, { quiet = false } = {}) {
+  const logging = new Set();
+  async function logSet(exId, ...a) {
+    if (logging.has(exId)) return;
+    logging.add(exId);
+    try { return await logSetNow(exId, ...a); } finally { logging.delete(exId); }
+  }
+  async function logSetNow(exId, vals, { quiet = false } = {}) {
     let run = active();
     if (!run) { await start(undefined, true); run = active(); }
     if (!run) return;

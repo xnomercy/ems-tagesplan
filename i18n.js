@@ -76,6 +76,9 @@ const TR = {
   "mit Frist": "son tarihli",
   "Tippe unten aufs Mikro und sag, was ansteht.": "Aşağıdaki mikrofona dokun ve yapılacakları söyle.",
   "Laden fehlgeschlagen: {x}": "Yüklenemedi: {x}",
+  "Nochmal versuchen": "Tekrar dene",
+  "Keine Verbindung. Öffne die App einmal mit Internet, danach geht sie auch offline.": "Bağlantı yok. Uygulamayı bir kez internetle aç, sonra çevrimdışı da çalışır.",
+  "Minuten danach (minus = vorher)": "Sonra kaç dakika (eksi = önce)",
   // Routinen
   "{n} Einträge": "{n} kayıt",
   "Feste, wiederkehrende Punkte. Tippe zum Bearbeiten.": "Sabit, tekrarlanan işler. Düzenlemek için dokun.",

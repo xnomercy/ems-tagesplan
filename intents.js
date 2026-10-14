@@ -118,7 +118,7 @@ export function parseIntent(text, now = new Date(), targets = [], lang = "de", s
   const body = bodyIntent(s);
   if (body && !isNew) return body;
 
-  const ex = RE.erinnerung.test(s) ? null : extraIntent(s, now, lang);
+  const ex = RE.erinnerung.test(s) ? null : extraIntent(s, now, lang, isNew);
   if (ex) return ex;
 
   const tr = RE.erinnerung.test(s) || isNew ? null : trainingIntent(s, training);
@@ -445,13 +445,15 @@ function trainingIntent(s, { exercises = [], workouts = [], running = false } = 
 // Wasser, Koran, Fasten, Ramadan, Schlaf, Barcode und Fristen
 const NUM = (w) => (w == null ? 1 : /\d/.test(w) ? Number(w.replace(",", ".")) : ZAHL[w.toLowerCase()] ?? 1);
 const NUMW = `(\\d+(?:[.,]\\d+)?|${Object.keys(ZAHL).join("|")})`;
-function extraIntent(s, now, lang) {
+function extraIntent(s, now, lang, isNew = false) {
   let m;
+  // „Leg Aufgabe an Unterlagen scannen“ oder „Termin morgen 10 Uhr Brief lesen“ legt etwas an statt Scanner/Import zu öffnen
+  const creates = isNew || (rx(`termin${W}|aufgabe${W}|randevu${W}|görev${W}`).test(s) && /\d|morgen|heute|yarın|bugün|^\s*(?:leg|trag|neue?)\b/i.test(s));
   // Dokument: "Brief scannen", "Termin aus PDF übernehmen", "belge oku", "mektubu tara"
   if (rx(`brief${W}|dokument${W}|pdf|foto${W}|bild${W}|schreiben|belge${W}|mektub?${W}|evrak${W}|fotoğraf${W}|resim${W}`).test(s)
-    && rx(`scann${W}|einles${W}|lies${W}|lesen|import${W}|auswert${W}|übernehm${W}|übernimm|tara${W}|oku${W}|yükle${W}|aktar${W}`).test(s)) return { type: "import" };
+    && rx(`scann${W}|einles${W}|lies${W}|lesen|import${W}|auswert${W}|übernehm${W}|übernimm|tara${W}|oku${W}|yükle${W}|aktar${W}`).test(s) && !creates) return { type: "import" };
   // Barcode: "scanne Barcode", "ist das halal", "barkod tara"
-  if (rx(`barcode${W}|strichcode${W}|scann${W}|barkod${W}|tara(?:t|yın)?`).test(s) || rx(`ist (?:das|es) halal|helal mi`).test(s)) return { type: "scan" };
+  if (!creates && (rx(`barcode${W}|strichcode${W}|scann${W}|barkod${W}|tara(?:t|yın)?`).test(s) || rx(`ist (?:das|es) halal|helal mi`).test(s))) return { type: "scan" };
 
   // Wasser: "ein Glas Wasser", "2 Gläser Wasser getrunken", "halber Liter Wasser", "bir bardak su içtim"
   if (rx(`wasser|su(?:yu)?`).test(s) && !rx(`kauf${W}|einkauf${W}|liste${W}|alışveriş${W}|al(?:dım)?|lazım|bitti|alle`).test(s)) {

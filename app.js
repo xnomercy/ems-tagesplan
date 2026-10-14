@@ -17,10 +17,14 @@ const SUPABASE_URL = "https://hpxdhtuabzqwyslzcmbt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kKiQdntJd893YvBPFx7fhw_FYzlwwtz";
 const DEMO = new URLSearchParams(location.search).has("demo");
 // Bei jeder Veröffentlichung zusammen mit version.json und dem Cache-Namen in sw.js hochzählen
-const APP_VERSION = "29";
+const APP_VERSION = "30";
 const rawDb = DEMO
   ? (await import("./mock.js")).db
-  : (await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm")).createClient(SUPABASE_URL, SUPABASE_KEY);
+  : (await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm").catch((e) => {
+    // Ohne Netz und ohne gespeicherte Bibliothek: Hinweis statt weißem Bildschirm
+    document.body.insertAdjacentHTML("beforeend", `<p style="padding:40px 24px;text-align:center">${t("Keine Verbindung. Öffne die App einmal mit Internet, danach geht sie auch offline.")}</p>`);
+    throw e;
+  })).createClient(SUPABASE_URL, SUPABASE_KEY);
 // Ohne Netz: Änderungen warten in einer Schlange und gehen raus, sobald wieder Netz da ist
 const db = withOffline(rawDb, { onChange: (n, res) => onOutbox(n, res) });
 
@@ -98,7 +102,16 @@ async function boot() {
   });
   state.user = data.session?.user ?? null;
   showScreen();
-  if ("serviceWorker" in navigator && !DEMO) navigator.serviceWorker.register("sw.js").catch(() => {});
+  if ("serviceWorker" in navigator && !DEMO) {
+    const first = !navigator.serviceWorker.controller;
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+    // Beim allerersten Öffnen lief Supabase & Co. noch am Service Worker vorbei: einmal nachladen, damit sie offline da sind
+    if (first) navigator.serviceWorker.addEventListener("controllerchange", () => {
+      for (const r of performance.getEntriesByType("resource")) {
+        if (/^https:\/\/(cdn\.jsdelivr\.net|fonts\.googleapis\.com|fonts\.gstatic\.com)\//.test(r.name)) fetch(r.name, { mode: r.name.includes("jsdelivr") ? "cors" : "no-cors" }).catch(() => {});
+      }
+    }, { once: true });
+  }
 }
 
 async function showScreen() {
@@ -149,11 +162,13 @@ async function prayerTimes(date) {
   if (DEMO) return { Imsak: "05:48", Fajr: "05:58", Dhuhr: "13:21", Asr: "16:19", Maghrib: "18:41", Isha: "20:13", HijriMonth: new URLSearchParams(location.search).has("ramadan") ? 9 : 4, HijriDay: 12 };
   if (!s || s.lat == null) return null;
   const key = `pt2:${isoDate(date)}:${s.lat.toFixed(2)}:${s.lng.toFixed(2)}:${s.prayer_method}`;
-  try { const c = localStorage.getItem(key); if (c) return JSON.parse(c); } catch {}
+  try { const c = JSON.parse(localStorage.getItem(key) || "null"); if (c?.Fajr) return c; } catch {}
   try {
     const d = `${String(date.getDate()).padStart(2, "0")}-${String(date.getMonth() + 1).padStart(2, "0")}-${date.getFullYear()}`;
     const res = await fetch(`https://api.aladhan.com/v1/timings/${d}?latitude=${s.lat}&longitude=${s.lng}&method=${s.prayer_method}`);
-    const j = (await res.json()).data;
+    const j = res.ok ? (await res.json()).data : null;
+    // Fehlerantworten nicht speichern, sonst bleibt der Tag ohne Zeiten
+    if (!j?.timings?.Fajr) return null;
     // Hidschri-Monat mitmerken: 9 = Ramadan
     const tm = { ...j.timings, HijriMonth: j.date?.hijri?.month?.number ?? null, HijriDay: Number(j.date?.hijri?.day) || null };
     try { localStorage.setItem(key, JSON.stringify(tm)); } catch {}
@@ -222,9 +237,9 @@ async function refresh() {
 // Uhrzeit einer Routine: Gebetszeit, an ein Gebet gekoppelt oder fest
 const PRAYER_NAMES = { fajr: "Fajr", dhuhr: "Dhuhr", asr: "Asr", maghrib: "Maghrib", isha: "Isha" };
 function routineTime(rt, pt) {
-  if (rt.prayer) return pt ? pt[PRAYER_API[rt.prayer]].slice(0, 5) : null;
+  if (rt.prayer) return pt?.[PRAYER_API[rt.prayer]]?.slice(0, 5) ?? null;
   if (rt.anchor_prayer) {
-    if (!pt) return null;
+    if (!pt?.[PRAYER_API[rt.anchor_prayer]]) return null;
     const [h, m] = pt[PRAYER_API[rt.anchor_prayer]].slice(0, 5).split(":").map(Number);
     const off = rt.anchor_offset ?? 15;
     let t = h * 60 + m + off;
@@ -329,7 +344,7 @@ function renderDay() {
   if (pressing.length && !shopDay) html += `<div class="hint warn">${t("Einkaufen: {x}", { x: pressing.slice(0, 4).map((x) => esc(x.name)).join(", ") + (pressing.length > 4 ? " …" : "") })} <button data-open-shop>${t("Öffnen")}</button></div>`;
   if (shopOpen?.length && shopDay) {
     const byStore = Object.entries(shopOpen.reduce((a, x) => ((a[x.store] = (a[x.store] ?? 0) + 1), a), {}));
-    html += `<div class="hint">${t("Einkaufsliste: {n} offen", { n: shopOpen.length })}${byStore.length > 1 ? " (" + byStore.map(([k, n]) => `${t(STORES[k] ?? k)} ${n}`).join(", ") + ")" : ""} <button data-open-shop>${t("Öffnen")}</button></div>`;
+    html += `<div class="hint">${t("Einkaufsliste: {n} offen", { n: shopOpen.length })}${byStore.length > 1 ? " (" + byStore.map(([k, n]) => `${esc(t(STORES[k] ?? k))} ${n}`).join(", ") + ")" : ""} <button data-open-shop>${t("Öffnen")}</button></div>`;
   }
   const low = lowSupplies();
   if (isToday && low.length) html += `<div class="hint warn">${t("Vorrat")}: ${low.map((x) => `${esc(x.name)} ${supplyDays(x) <= 0 ? t("leer") : t("noch {n} Tage", { n: supplyDays(x) })}`).join(", ")} <button data-goto="vorrat">${t("Ansehen")}</button></div>`;
@@ -429,7 +444,7 @@ function listHtml() {
   const aufgaben = shown.filter((i) => i.kind === "aufgabe" && !i.done);
   const used = [...new Set(data.map((i) => i.area).filter(Boolean))];
   let html = used.length ? `<div class="chips">${[["", t("Alle")], ...used.map((a) => [a, AREAS[a] ?? a])]
-    .map(([v, n]) => `<button class="chip ${f === v ? "on" : ""}" data-area="${v}">${n}</button>`).join("")}</div>` : "";
+    .map(([v, n]) => `<button class="chip ${f === v ? "on" : ""}" data-area="${esc(v)}">${esc(n)}</button>`).join("")}</div>` : "";
   html += `<div class="section-head"><h3>${t("Kommende Termine")}</h3></div>`;
   if (!termine.length) html += `<div class="empty">${t("Keine Termine.")}</div>`;
   let last = "";
@@ -628,7 +643,7 @@ function renderMehr() {
 
 // ---------- Supplement-Vorrat ----------
 const fmtNum = (n) => (Math.round(n * 10) / 10).toLocaleString(LOCALE());
-const daysSince = (iso) => Math.max(0, Math.floor((Date.parse(isoDate(new Date()) + "T12:00") - Date.parse(iso + "T12:00")) / 864e5));
+const daysSince = (iso) => Math.max(0, Math.round((Date.parse(isoDate(new Date()) + "T12:00") - Date.parse(iso + "T12:00")) / 864e5));
 const supplyLeft = (x) => Math.max(0, Number(x.stock) - Number(x.per_day) * daysSince(x.counted_on));
 const supplyDays = (x) => (Number(x.per_day) > 0 ? Math.floor(supplyLeft(x) / Number(x.per_day)) : Infinity);
 const lowSupplies = () => (state.supplies ?? []).filter((x) => supplyDays(x) <= (x.warn_days ?? 7));
@@ -920,7 +935,7 @@ function openDetail(e) {
   const isRoutine = e.kind === "routine";
   const kindLabel = e.kind === "termin" ? t("Termin") : e.kind === "aufgabe" ? t("Aufgabe") : CATEGORIES[e.category] ?? t("Routine");
   const when = isRoutine
-    ? `${raw.days?.length === 7 ? t("Täglich") : (raw.days ?? []).map((d) => DAY_SHORT[d - 1]).join(", ")}${e.time ? " · " + e.time : ""}${raw.anchor_prayer ? ` (${PRAYER_NAMES[raw.anchor_prayer]} +${raw.anchor_offset})` : raw.prayer ? ` (${t("Gebetszeit")})` : ""}`
+    ? `${raw.days?.length === 7 ? t("Täglich") : (raw.days ?? []).map((d) => DAY_SHORT[d - 1]).join(", ")}${e.time ? " · " + e.time : ""}${raw.anchor_prayer ? ` (${routineWhen(raw)})` : raw.prayer ? ` (${t("Gebetszeit")})` : ""}`
     : `${fmtDay(raw.on_date, { weekday: "long", day: "numeric", month: "long" })}${raw.start_time ? " · " + hhmm(raw.start_time) : ""}${raw.end_time ? "–" + hhmm(raw.end_time) : ""}`;
   const remind = raw.remind_before ? (raw.remind_before >= 60 ? t("{n} Std. vorher", { n: raw.remind_before / 60 }) : t("{n} Min. vorher", { n: raw.remind_before })) : null;
   const rows = [
@@ -1070,7 +1085,7 @@ function openRoutineSheet(r = {}) {
     </select>
     <div class="row">
       <div id="fix-time" ${rt.anchor_prayer ? "hidden" : ""}><label>${t("Uhrzeit")}</label><input name="at_time" type="time" value="${hhmm(rt.at_time)}"></div>
-      <div id="anchor-off" ${rt.anchor_prayer ? "" : "hidden"}><label>${t("Minuten danach")}</label><input name="anchor_offset" type="number" min="0" max="240" step="5" value="${rt.anchor_offset ?? 15}"></div>
+      <div id="anchor-off" ${rt.anchor_prayer ? "" : "hidden"}><label>${t("Minuten danach (minus = vorher)")}</label><input name="anchor_offset" type="number" min="-720" max="720" step="5" value="${rt.anchor_offset ?? 15}"></div>
     </div>`}
     ${prioSeg(rt.priority)}
     <label>${t("Wiederholen an")}</label>
@@ -1553,7 +1568,7 @@ async function runIntent(c) {
   switch (c.type) {
     case "hilfe": return openHelp();
     case "sprache":
-      setLang(c.lang); render(); saveSettings({ lang: LANG });
+      setLang(c.lang); $("#view-termine").innerHTML = ""; render(); saveSettings({ lang: LANG });
       return toast(c.lang === "tr" ? "Dil: Türkçe" : "Sprache: Deutsch");
     case "theme":
       setTheme(c.theme);
@@ -1614,7 +1629,7 @@ async function runIntent(c) {
       let x = c.supply;
       if (c.mode === "info") return toast(`${x.name}: ${fmtNum(supplyLeft(x))} ${t(x.unit)} · ${supplyDays(x) <= 0 ? t("leer") : t("reicht {n} Tage", { n: supplyDays(x) })}`);
       if (!x) {
-        const { data, error } = await db.from("supplies").insert({ name: c.name, stock: 0, per_day: 1 }).select().single();
+        const { data, error } = await db.from("supplies").insert({ name: c.name, stock: 0, per_day: 1, counted_on: isoDate(new Date()) }).select().single();
         if (error) return toast(error.message);
         x = data;
       }
@@ -1836,10 +1851,13 @@ let toastTimer;
 function toast(msg, undo) {
   const el = $("#toast");
   el.innerHTML = `<span>${esc(msg)}</span>${undo ? `<button>${t("Rückgängig")}</button>` : ""}`;
+  // Als Popover liegt der Hinweis auch über offenen Blättern (die sonst alles verdecken)
+  const hide = () => { el.hidden = true; try { el.hidePopover?.(); } catch {} };
   el.hidden = false;
-  if (undo) el.querySelector("button").onclick = () => { el.hidden = true; undo(); };
+  try { el.hidePopover?.(); el.showPopover?.(); } catch {}
+  if (undo) el.querySelector("button").onclick = () => { hide(); undo(); };
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (el.hidden = true), undo ? 6000 : 3000);
+  toastTimer = setTimeout(hide, undo ? 6000 : 3000);
 }
 
 document.addEventListener("visibilitychange", () => { if (!document.hidden && state.user) refresh(); if (!document.hidden) checkVersion(); });

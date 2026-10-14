@@ -233,6 +233,8 @@ code.link { display: block; word-break: break-all; font-size: 12px; background: 
   display: flex; gap: 14px; align-items: center; justify-content: space-between; font-weight: 600; font-size: 14px;
   box-shadow: 0 8px 24px rgba(11,61,74,.3);
 }
+#toast[popover] { top: auto; margin: 0 auto; border: 0; width: auto; height: auto; overflow: visible; inset-inline: 16px; }
+body:has(#rest) #toast { bottom: calc(var(--nav-space) + 76px); }
 #toast span { flex: 1; }
 #toast button { flex: none;  border: 0; background: none; color: var(--tuerkis); font-weight: 800; }
 
@@ -306,7 +308,7 @@ input[type=date]::-webkit-date-and-time-value, input[type=time]::-webkit-date-an
 input[type=date]:not(:valid)::before, input[type=time]:placeholder-shown::before { color: var(--muted); }
 .row { min-width: 0; }
 .row > * { min-width: 0; }
-.seg button { font-size: 15px; white-space: nowrap; }
+.seg button { font-size: 15px; white-space: nowrap; padding: 0 8px; }
 
 /* Schalter statt Häkchen für "aktiv" */
 .switch { display: flex !important; align-items: center; justify-content: space-between; gap: 12px; background: var(--card); border-radius: 14px; padding: 12px 16px; margin-top: 14px !important;
@@ -380,7 +382,7 @@ button.pick.empty { color: var(--muted); font-weight: 400; }
 .cal.month .dot.prio { background: #E5252A; }
 .cal.month .dot.done { background: var(--done); opacity: .7; }
 .cal.month button.sel .dot { background: #fff; }
-.link-btn { border: 0; background: none; color: var(--petrol); font: inherit; font-weight: 700; font-size: 14px; padding: 0; }
+.link-btn { border: 0; background: none; color: var(--petrol); font: inherit; font-weight: 700; font-size: 14px; padding: 0; min-height: 40px; }
 
 /* Vorrat */
 .sup-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--soft); }
@@ -421,7 +423,8 @@ button.pick.empty { color: var(--muted); font-weight: 400; }
 .ex-card { padding-bottom: 8px; }
 .ex-card.complete { background: var(--done-bg); }
 .ex-top { display: flex; gap: 12px; align-items: center; }
-.ex-top h3 { margin: 0 0 4px; font-size: 17px; }
+.ex-top h3 { margin: 0 0 4px; font-size: 17px; overflow-wrap: anywhere; hyphens: auto; }
+@media (max-width: 400px) { .ex-top .fig-btn svg { width: 64px; height: 64px; } }
 .fig-btn { flex: none; border: 0; padding: 0; background: var(--bg); border-radius: 14px; }
 .set-grid { display: grid; grid-template-columns: 40px 1fr 1fr 48px; gap: 8px; align-items: center; margin-top: 12px; }
 .set-grid > span:nth-child(-n+4) { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
@@ -432,7 +435,7 @@ button.pick.empty { color: var(--muted); font-weight: 400; }
 .set-in::placeholder { color: var(--muted); opacity: .55; font-weight: 600; }
 .set-grid .check { justify-self: center; }
 .add-set { margin: 10px 0 2px; }
-#rest { position: fixed; left: 12px; right: 12px; bottom: calc(var(--nav-space) + 4px); z-index: 60; display: flex; align-items: center; gap: 8px; background: #0B3D4A; color: #fff; border-radius: 16px; padding: 10px 10px 10px 16px; box-shadow: 0 8px 24px rgba(0,0,0,.2); }
+#rest { position: fixed; left: 12px; right: 12px; bottom: calc(var(--nav-space) + 4px); z-index: 25; display: flex; align-items: center; gap: 8px; background: #0B3D4A; color: #fff; border-radius: 16px; padding: 10px 10px 10px 16px; box-shadow: 0 8px 24px rgba(0,0,0,.2); }
 #rest span { flex: 1; font-size: 15px; }
 #rest b { font-size: 20px; font-variant-numeric: tabular-nums; margin-left: 4px; }
 #rest button { border: 0; border-radius: 10px; background: rgba(255,255,255,.14); color: #fff; font: inherit; font-weight: 700; padding: 8px 12px; }
@@ -444,7 +447,9 @@ svg.progress { width: 100%; height: auto; background: var(--card); border-radius
 .progress circle { fill: var(--tuerkis); }
 .progress text { fill: var(--muted); font-size: 11px; font-weight: 700; }
 .ex-hist div { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; border-bottom: 1px solid var(--soft); }
-.fig-pick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.fig-pick { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.fig-pick svg { max-width: 100%; height: auto; }
+.fig-pick span { overflow-wrap: anywhere; hyphens: auto; }
 .fig-pick button { border: 2px solid transparent; background: var(--card); border-radius: 14px; padding: 6px 4px; display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--text); font: inherit; font-size: 11px; line-height: 1.2; }
 .fig-pick button.on { border-color: var(--petrol); }
 .w-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
@@ -630,6 +635,7 @@ body.nav-open .sidenav-list button:nth-child(6) { transition-delay: .15s; } body
 .quran-top .big { font-size: 30px; font-weight: 800; }
 .quran-add { flex-wrap: wrap; margin-top: 6px; }
 .fast-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 5px; margin-top: 8px; }
+@media (max-width: 420px) { .fast-grid { grid-template-columns: repeat(6, 1fr); gap: 6px; } }
 .fast-day { aspect-ratio: 1; border: 1.5px solid var(--line); border-radius: 8px; background: var(--card); font-size: 12px; font-weight: 700; color: var(--muted); padding: 0; }
 .fast-day.ja { background: var(--done); border-color: var(--done); color: #fff; }
 .fast-day.nein { background: #FDECEC; border-color: #F3C7C5; color: #B3261E; }
