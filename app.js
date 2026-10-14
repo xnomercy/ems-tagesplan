@@ -17,12 +17,31 @@ const SUPABASE_URL = "https://hpxdhtuabzqwyslzcmbt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kKiQdntJd893YvBPFx7fhw_FYzlwwtz";
 const DEMO = new URLSearchParams(location.search).has("demo");
 // Bei jeder Veröffentlichung zusammen mit version.json und dem Cache-Namen in sw.js hochzählen
-const APP_VERSION = "28";
+const APP_VERSION = "29";
 const rawDb = DEMO
   ? (await import("./mock.js")).db
   : (await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm")).createClient(SUPABASE_URL, SUPABASE_KEY);
 // Ohne Netz: Änderungen warten in einer Schlange und gehen raus, sobald wieder Netz da ist
 const db = withOffline(rawDb, { onChange: (n, res) => onOutbox(n, res) });
+
+// Platz unter dem Inhalt so groß wie die untere Leiste samt Sprachknopf, gemessen ab Bildschirmunterkante.
+// iOS-Safari setzt fixierte Leisten teils über seine eigene Werkzeugleiste, dann reicht ein fester Wert nicht.
+function measureNavSpace() {
+  const tabs = document.querySelector(".tabs");
+  if (!tabs || !tabs.offsetHeight) return;
+  const fab = document.getElementById("mic");
+  const top = Math.min(tabs.getBoundingClientRect().top, fab ? fab.getBoundingClientRect().top : Infinity);
+  const bottom = Math.max(window.innerHeight, document.documentElement.clientHeight);
+  const space = Math.round(bottom - top);
+  if (space > 0 && space < bottom / 2 && space !== measureNavSpace.last) {
+    measureNavSpace.last = space;
+    document.documentElement.style.setProperty("--nav-space", space + "px");
+  }
+}
+if (window.ResizeObserver) { const t = document.querySelector(".tabs"); if (t) new ResizeObserver(measureNavSpace).observe(t); }
+addEventListener("resize", measureNavSpace);
+window.visualViewport?.addEventListener("resize", measureNavSpace);
+addEventListener("scroll", () => requestAnimationFrame(measureNavSpace), { passive: true });
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
