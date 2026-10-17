@@ -9,6 +9,7 @@ import { createDayLog } from "./daylog.js";
 import { createScanner } from "./halal-scan.js";
 import { createGlaube, ramadanActive, ramadanShift } from "./glaube.js";
 import { createZikir } from "./zikir.js";
+import { createKoran } from "./koran.js";
 import { createWellness, sleepOffset } from "./wellness.js";
 import { createDeadlines } from "./fristen.js";
 import { createReview } from "./rueckblick.js";
@@ -18,7 +19,7 @@ const SUPABASE_URL = "https://hpxdhtuabzqwyslzcmbt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kKiQdntJd893YvBPFx7fhw_FYzlwwtz";
 const DEMO = new URLSearchParams(location.search).has("demo");
 // Bei jeder Veröffentlichung zusammen mit version.json und dem Cache-Namen in sw.js hochzählen
-const APP_VERSION = "30";
+const APP_VERSION = "31";
 const rawDb = DEMO
   ? (await import("./mock.js")).db
   : (await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm").catch((e) => {
@@ -265,7 +266,7 @@ function render() {
   if (state.view !== "heute") $("#greeting").textContent = t(PAGES[state.view]?.label ?? "");
   ({ heute: renderDay, plan: renderPlan, termine: renderTermine, mehr: renderMehr, vorrat: renderVorrat,
     training: () => training.render($("#view-training")), einkauf: () => shopping.render($("#view-einkauf")),
-    glaube: () => glaube.render($("#view-glaube")), zikir: () => zikir.render($("#view-zikir")), fristen: () => deadlines.load().then(() => deadlines.render($("#view-fristen"))),
+    glaube: () => glaube.render($("#view-glaube")), zikir: () => zikir.render($("#view-zikir")), koran: () => koran.render($("#view-koran")), fristen: () => deadlines.load().then(() => deadlines.render($("#view-fristen"))),
     rueckblick: () => review.render($("#view-rueckblick")) })[state.view]();
   updateNav();
 }
@@ -856,7 +857,7 @@ document.addEventListener("click", async (ev) => {
 // Plus oben legt je nach Seite das Passende an
 $("#add").onclick = () => ({
   einkauf: () => shopping.openNew(), training: () => training.newExercise(), vorrat: () => openSupplySheet(), plan: () => openRoutineSheet(),
-  glaube: () => glaube.openAdd(), zikir: () => zikir.openAdd(), fristen: () => deadlines.openEdit(),
+  glaube: () => glaube.openAdd(), zikir: () => zikir.openAdd(), koran: () => koran.openSearch(), fristen: () => deadlines.openEdit(),
 }[state.view] ?? (() => openItemSheet()))();
 $("#greeting").onclick = () => { state.day = new Date(); switchView("heute"); };
 
@@ -871,6 +872,7 @@ const ICON = {
   einkauf: '<path d="M3 4h2.5l2.2 11.2a1.5 1.5 0 0 0 1.5 1.3h8.6a1.5 1.5 0 0 0 1.5-1.2L21 8H6.3"/><circle cx="9.5" cy="20" r="1.3"/><circle cx="17.5" cy="20" r="1.3"/>',
   vorrat: '<rect x="7" y="3" width="10" height="4" rx="1"/><path d="M8 7h8v12a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2z"/><path d="M8 12h8"/>',
   glaube: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/><path d="M14.5 7.2a3 3 0 1 0 0 5.6 3.6 3.6 0 1 1 0-5.6z"/>',
+  koran: '<path d="M12 6.5C10 5 7 4.5 3 5v14c4-.5 7 0 9 1.5 2-1.5 5-2 9-1.5V5c-4-.5-7 0-9 1.5z"/><path d="M12 6.5v14"/>',
   zikir: '<circle cx="12" cy="4.5" r="1.8"/><circle cx="17.3" cy="7.6" r="1.8"/><circle cx="17.3" cy="13.7" r="1.8"/><circle cx="12" cy="16.8" r="1.8"/><circle cx="6.7" cy="13.7" r="1.8"/><circle cx="6.7" cy="7.6" r="1.8"/><path d="M12 18.6V22"/>',
   fristen: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4"/><path d="M14 3v5h5M19 8v2"/><circle cx="17" cy="17" r="4"/><path d="M17 15.5V17l1 1"/>',
   rueckblick: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
@@ -878,7 +880,7 @@ const ICON = {
 };
 const PAGES = {
   heute: { label: "Tag" }, termine: { label: "Termine" }, plan: { label: "Routinen" }, training: { label: "Training" },
-  einkauf: { label: "Einkauf" }, vorrat: { label: "Supplement-Vorrat" }, glaube: { label: "Koran & Ramadan" }, zikir: { label: "Zikir" }, fristen: { label: "Fristen & Verträge" },
+  einkauf: { label: "Einkauf" }, vorrat: { label: "Supplement-Vorrat" }, glaube: { label: "Koran & Ramadan" }, koran: { label: "Koran lesen" }, zikir: { label: "Zikir" }, fristen: { label: "Fristen & Verträge" },
   rueckblick: { label: "Wochenrückblick" }, mehr: { label: "Einstellungen" },
 };
 function navCount(k) {
@@ -1273,6 +1275,7 @@ const common = { db, t, esc, $, toast, openSheet, closeSheet, sheet, form, fmtDa
 const glaube = createGlaube({ ...common, daylog, settings: () => state.settings, saveSettings, getPt: () => state.pt });
 const wellness = createWellness({ ...common, daylog, settings: () => state.settings, getPt: () => state.pt });
 const zikir = createZikir({ ...common, daylog, settings: () => state.settings, saveSettings });
+const koran = createKoran({ ...common, glaube });
 const deadlines = createDeadlines({ ...common, onChange: () => { state.upcoming = null; refresh(); }, onImport: () => importer.open() });
 const importer = createImport({ ...common, deadlines, lang: () => LANG, openItemSheet: (a, b) => openItemSheet(a, b), onChange: () => { state.upcoming = null; refresh(); } });
 const review = createReview({ ...common, daylog, routines: () => state.routines, settings: () => state.settings, budget: () => null });
@@ -1354,6 +1357,7 @@ const EXAMPLES = {
   einkauf: ["Milch, 6 Eier und 500 g Hack auf die Einkaufsliste", "Milch gekauft", "Scanne Barcode"],
   vorrat: ["Magnesium aufgefüllt 60", "Wie lange reicht Magnesium", "Noch 40 Ashwagandha"],
   glaube: ["Koran 5 Seiten gelesen", "Koran-Ziel bis 30. März", "Heute gefastet"],
+  koran: ["Sure 36 öffnen", "Sure 2 Ayet 255", "Koran Seite 250 aufschlagen"],
   zikir: ["1000 Zikir gemacht", "Wie viel Zikir heute", "Zikir-Ziel 6000"],
   fristen: ["TÜV am 12.3.2027", "Handyvertrag endet am 1.8.2027 Kündigungsfrist 3 Monate", "Brief scannen"],
   rueckblick: ["Zeig den Wochenrückblick", "Wann soll ich schlafen", "2 Gläser Wasser"],
@@ -1367,6 +1371,7 @@ const EXAMPLES_TR = {
   einkauf: ["Alışveriş listesine süt ve yumurta ekle", "Süt aldım", "Barkod tara"],
   vorrat: ["Magnezyum doldurdum 60", "Magnezyum ne kadar yeter", "40 tane ashwagandha kaldı"],
   glaube: ["Kuran 5 sayfa okudum", "Kuran hatmi 30 mart'a kadar", "Oruç tuttum"],
+  koran: ["Yasin suresini aç", "Bakara suresi 255. ayet", "Kuran 250. sayfa aç"],
   zikir: ["1000 zikir çektim", "Bugün ne kadar zikir", "Zikir hedefi 6000"],
   fristen: ["Muayene 12.3.2027", "Telefon sözleşmesi 1.8.2027 fesih süresi 3 ay", "Belge oku"],
   rueckblick: ["Haftalık özeti göster", "Ne zaman yatmalıyım", "2 bardak su"],
@@ -1476,7 +1481,7 @@ function describe(cmd) {
   if (cmd.type === "sprache") return [t("Sprache"), cmd.lang === "tr" ? "Türkçe" : "Deutsch"];
   if (cmd.type === "theme") return [t("Darstellung"), t({ auto: "Automatisch", light: "Hell", dark: "Dunkel" }[cmd.theme])];
   if (cmd.type === "gruppe") return [t("Routinen"), t(cmd.g === "zeit" ? "Nach Tageszeit" : "Nach Bereich")];
-  if (cmd.type === "zeige") return [t("Anzeigen"), cmd.date ? fmtDay(cmd.date, { weekday: "long", day: "numeric", month: "long" }) : t({ heute: "Tag", termine: "Termine", plan: "Routinen", mehr: "Einstellungen", monat: "Monat", verlauf: "Verlauf", vorrat: "Supplement-Vorrat", training: "Training", einkauf: "Einkaufsliste", glaube: "Koran & Ramadan", zikir: "Zikir", fristen: "Fristen & Verträge", rueckblick: "Wochenrückblick" }[cmd.view])];
+  if (cmd.type === "zeige") return [t("Anzeigen"), cmd.date ? fmtDay(cmd.date, { weekday: "long", day: "numeric", month: "long" }) : t({ heute: "Tag", termine: "Termine", plan: "Routinen", mehr: "Einstellungen", monat: "Monat", verlauf: "Verlauf", vorrat: "Supplement-Vorrat", training: "Training", einkauf: "Einkaufsliste", glaube: "Koran & Ramadan", koran: "Koran lesen", zikir: "Zikir", fristen: "Fristen & Verträge", rueckblick: "Wochenrückblick" }[cmd.view])];
   if (cmd.type === "suche") return [t("Suche"), cmd.q];
   if (cmd.type === "wasser") return [t("Wasser"), cmd.action === "status" ? t("Stand anzeigen") : t("+{n} Gläser ({l} l)", { n: cmd.n, l: wellness.liters(cmd.n) })];
   if (cmd.type === "scan") return [t("Packung scannen"), t("Halal-Prüfung")];
@@ -1652,6 +1657,12 @@ async function runIntent(c) {
       const r = await zikir.runVoice(c);
       if (r?.msg) toast(r.msg, r.undo ? async () => { await r.undo(); render(); } : null);
       return render();
+    }
+    case "koran": {
+      const r = await koran.open(c);
+      if (state.view === "koran") render(); else switchView("koran");
+      if (r?.msg) toast(r.msg);
+      return;
     }
     case "glaube": {
       const r = await glaube.runVoice(c);

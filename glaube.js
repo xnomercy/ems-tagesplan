@@ -1,4 +1,6 @@
 // Koran-Fortschritt und Ramadan (Sahur, Iftar, Fasten-Tracker, verschobene Zeiten). Alles regelbasiert.
+import { lastPage } from "./koran.js";
+
 export const QURAN_PAGES = 604;
 const toMin = (t) => { const [h, m] = String(t).slice(0, 5).split(":").map(Number); return h * 60 + m; };
 const fmt = (m) => { m = ((m % 1440) + 1440) % 1440; return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`; };
@@ -115,7 +117,8 @@ export function createGlaube(ctx) {
     const active = ramadanActive(s, pt);
     const f = fastTimes(pt);
     const k = kaza();
-    let html = `<div class="section-head"><h3>${t("Koran")}</h3>${q ? `<span class="muted">${t("Juz {n}", { n: q.juz })}</span>` : ""}</div><div class="card quran-card">`;
+    let html = `<div class="section-head"><h3>${t("Koran")}</h3>${q ? `<span class="muted">${t("Juz {n}", { n: q.juz })}</span>` : ""}</div><div class="card quran-card">
+      <button type="button" class="btn fill kr-open" data-goto="koran">${lastPage() > 1 ? t("Weiterlesen · Seite {p}", { p: lastPage() }) : t("Koran lesen")}</button>`;
     if (q) {
       const pct = Math.round((q.page / QURAN_PAGES) * 100);
       html += `<div class="quran-top"><div><b class="big">${q.page}</b><span class="muted"> / ${QURAN_PAGES} ${t("Seiten")}</span></div><span class="muted small">${pct}%</span></div>
@@ -126,7 +129,7 @@ export function createGlaube(ctx) {
     } else {
       html += `<p class="small">${t("Setz ein Ziel, bis wann du den Koran durchlesen willst. Die App rechnet dir jeden Tag das Pensum aus.")}</p>`;
     }
-    html += `<button class="btn ${q ? "" : "fill"}" id="quran-goal">${t(q ? "Ziel ändern" : "Ziel festlegen")}</button></div>`;
+    html += `<button class="btn" id="quran-goal">${t(q ? "Ziel ändern" : "Ziel festlegen")}</button></div>`;
 
     html += `<div class="section-head"><h3>${t("Ramadan")}</h3><span class="muted">${active ? t("aktiv") : ""}</span></div><div class="card">
       <div class="seg" id="ram-seg">${[["auto", "Automatisch"], ["an", "An"], ["aus", "Aus"]].map(([v, n]) => `<button type="button" data-ram="${v}" class="${(s.ramadan ?? "auto") === v ? "on" : ""}">${t(n)}</button>`).join("")}</div>
@@ -207,5 +210,5 @@ export function createGlaube(ctx) {
     return null;
   }
 
-  return { load, render, dayCard, dayHint, runVoice, openAdd, openGoal, setFast, quran, kaza };
+  return { load, render, dayCard, dayHint, runVoice, openAdd, openGoal, setFast, setPage, quran, kaza };
 }

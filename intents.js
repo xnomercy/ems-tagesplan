@@ -5,6 +5,7 @@ import { parseDate, parseTime, findMatch } from "./parser.js";
 import { parseDateTr, parseTimeTr, findPrayer } from "./parser-tr.js";
 import { parseItems, normName } from "./einkauf.js";
 import { parseDeadline } from "./fristen.js";
+import { parseKoranRef } from "./koran.js";
 
 const B = "(?<![\\p{L}\\d])";
 const E = "(?![\\p{L}\\d])";
@@ -483,8 +484,18 @@ function extraIntent(s, now, lang, isNew = false) {
     if (rx(`getrunken|trink${W}|içtim|içiyorum`).test(s)) return { type: "wasser", action: "add", n: 1 };
   }
 
-  // Koran: "Koran 5 Seiten gelesen", "ein Juz gelesen", "Ich bin bei Seite 245", "Koran-Ziel bis 30. März"
+  // Koran lesen: "Koran öffnen", "Koran Seite 250 aufschlagen", "Sure 2 Ayet 255", "Yasin suresi", "Ayetel Kürsi", "Kuran'ı aç", "Juz 30 lesen"
   const quran = rx(`koran${W}|quran|kuran${W}|kur'an${W}`).test(s);
+  {
+    const ref = parseKoranRef(s);
+    const sura = rx(`sure|sura|surah|suren|sures[iı]|ayet${W}|ayat${W}|ayetel${W}|thronvers${W}`).test(s);
+    const open = rx(`öffne${W}|aufschlag${W}|schlag${W}|zeig${W}|lies|lesen|weiterlesen|aç|göster${W}|oku|git|geh${W}`).test(s);
+    // „2:255“ allein könnte eine Uhrzeit sein, darum nur mit Koran- oder Surenwort
+    if (ref?.s && (sura || quran)) return { type: "koran", s: ref.s, a: ref.a ?? null };
+    if (quran && open && !rx(`ziel${W}|hedef${W}`).test(s)) return { type: "koran", page: ref?.page ?? null, juz: ref?.juz ?? null };
+  }
+
+  // Koran: "Koran 5 Seiten gelesen", "ein Juz gelesen", "Ich bin bei Seite 245", "Koran-Ziel bis 30. März"
   if (quran || rx(`juz|cüz${W}`).test(s)) {
     if ((m = s.match(rx(`${NUMW}\\s*(?:juz|cüz${W})`)))) return { type: "glaube", action: "pages", pages: Math.round(NUM(m[1]) * 20) };
     if ((m = s.match(rx(`(?:bin|bei|auf|an)\\s+(?:der\\s+)?seite\\s+(\\d{1,3})|seite\\s+(\\d{1,3})\\s+(?:erreicht|angekommen)|(\\d{1,3})\\.?\\s*sayfa(?:day|sında|ya geldim)${W}|sayfa\\s+(\\d{1,3})(?:'?(?:dayım|deyim))`)))) {
