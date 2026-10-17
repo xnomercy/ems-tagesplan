@@ -1,6 +1,8 @@
 // Termine und Fristen aus Fotos, PDFs, Kalenderdateien und eingefügtem Text.
 // Alles läuft auf dem Handy: pdf.js liest den PDF-Text, Tesseract.js erkennt Text auf Fotos. Keine externe KI.
 import { deadlineKind, KINDS } from "./fristen.js";
+// Doppeltes Tippen während des Speicherns ignorieren
+const lock = (fn) => { let busy = false; return async (...a) => { a[0]?.preventDefault?.(); if (busy) return; busy = true; try { return await fn(...a); } finally { busy = false; } }; };
 
 const PDFJS = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/";
 const TESS = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/";
@@ -382,7 +384,7 @@ export function createImport(ctx) {
       }));
     });
     count();
-    el.querySelector("#imp-save").onclick = save;
+    el.querySelector("#imp-save").onclick = lock(save);
   }
 
   async function save() {

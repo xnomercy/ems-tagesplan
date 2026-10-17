@@ -42,6 +42,7 @@ export function summarize({ days, routines, completions, sessions, weights, trip
     shopping: { spend: Math.round(spend * 100) / 100, trips: trips.length },
     water: { avg: Math.round(water * 10) / 10, hits: wl.filter((l) => (l.water ?? 0) >= waterGoal).length },
     quran: wl.reduce((a, l) => a + (l.quran_pages ?? 0), 0),
+    zikr: { sum: wl.reduce((a, l) => a + (Number(l.zikr) || 0), 0), hits: wl.filter((l) => Number(l.zikr) > 0 && Number(l.zikr) >= (Number(l.zikr_goal) || Infinity)).length },
     fasted: wl.filter((l) => l.fasted === "ja").length,
   };
 }
@@ -69,18 +70,18 @@ export function createReview(ctx) {
     const cur = weekBounds(off), prev = weekBounds(off - 1);
     const [c, s, w, tr] = await Promise.all([
       db.from("completions").select("routine_id,on_date").gte("on_date", prev.from).lte("on_date", cur.to),
-      db.from("workout_sessions").select("started_at,finished_at").gte("started_at", prev.from + "T00:00:00").lte("started_at", cur.to + "T23:59:59"),
+      db.from("workout_sessions").select("started_at,finished_at").gte("started_at", new Date(prev.from + "T00:00:00").toISOString()).lte("started_at", new Date(cur.to + "T23:59:59").toISOString()),
       db.from("body_metrics").select("on_date,weight_kg").gte("on_date", iso(addDays(new Date(prev.from + "T12:00"), -21))).lte("on_date", cur.to),
-      db.from("shopping_trips").select("amount,finished_at").gte("finished_at", prev.from + "T00:00:00").lte("finished_at", cur.to + "T23:59:59"),
+      db.from("shopping_trips").select("amount,finished_at").gte("finished_at", new Date(prev.from + "T00:00:00").toISOString()).lte("finished_at", new Date(cur.to + "T23:59:59").toISOString()),
       daylog.load(prev.from, cur.to),
     ]);
     const td = iso(new Date());
     const pick = (b) => summarize({
       days: b.days, routines: routines(), today: td, waterGoal: settings()?.water_goal ?? 12,
       completions: (c.data ?? []).filter((x) => x.on_date >= b.from && x.on_date <= b.to),
-      sessions: (s.data ?? []).filter((x) => x.started_at.slice(0, 10) >= b.from && x.started_at.slice(0, 10) <= b.to),
+      sessions: (s.data ?? []).filter((x) => x.started_at && iso(new Date(x.started_at)) >= b.from && iso(new Date(x.started_at)) <= b.to),
       weights: w.data ?? [],
-      trips: (tr.data ?? []).filter((x) => x.finished_at.slice(0, 10) >= b.from && x.finished_at.slice(0, 10) <= b.to),
+      trips: (tr.data ?? []).filter((x) => x.finished_at && iso(new Date(x.finished_at)) >= b.from && iso(new Date(x.finished_at)) <= b.to),
       logs: daylog.range(b.from, b.to),
     });
     return { cur, now: pick(cur), prev: pick(prev) };
@@ -89,9 +90,13 @@ export function createReview(ctx) {
   const eur = (n) => n.toLocaleString(LOCALE(), { style: "currency", currency: "EUR" });
   const arrow = (a, b, better = 1) => (a == null || b == null || a === b ? "" : `<span class="rv-arrow ${(a - b) * better > 0 ? "up" : "down"}">${a > b ? "▲" : "▼"}</span>`);
 
+  let req = 0;
   async function render(host) {
     host.innerHTML = `<div class="empty">${t("Lade …")}</div>`;
-    const { cur, now: s, prev: p } = await data(offset);
+    const my = ++req, at = offset;
+    const res = await data(at);
+    if (my !== req) return; // schnelles Blättern: ältere Antwort verwerfen
+    const { cur, now: s, prev: p } = res;
     const lens = routines().filter((r) => r.active && r.category === "training" && r.days.length < 7).map((r) => r.days.length);
     const trainPlan = lens.length ? Math.max(...lens) : 3;
     const tipList = tips(s, p, { waterGoal: settings()?.water_goal ?? 12, trainPlan, budget: budget() });
@@ -108,6 +113,7 @@ export function createReview(ctx) {
         ${tile(t("Wasser"), `${s.water.avg.toLocaleString(LOCALE())}`, t("Gläser pro Tag"), arrow(s.water.avg, p.water.avg))}
         ${s.quran || p.quran ? tile(t("Koran"), String(s.quran), t("Seiten"), arrow(s.quran, p.quran)) : ""}
         ${s.fasted ? tile(t("Fasten"), String(s.fasted), t("Tage")) : ""}
+        ${s.zikr.sum || p.zikr.sum ? tile(t("Zikir"), s.zikr.sum.toLocaleString(LOCALE()), t("Ziel an {n} von 7 Tagen", { n: s.zikr.hits }), arrow(s.zikr.sum, p.zikr.sum)) : ""}
       </div>
       ${s.perPrayer.length ? `<div class="card rv-prayers">${s.perPrayer.map((x) => `<div><span>${PNAME[x.p]}</span><div class="bar"><div style="width:${x.pct ?? 0}%"></div></div><span class="small">${x.ok}/${x.exp}</span></div>`).join("")}</div>` : ""}
       ${tipList.length ? `<div class="card"><p class="eyebrow">${t("Für nächste Woche")}</p><ul class="rv-tips">${tipList.map(([k, v]) => `<li>${esc(t(k, v))}</li>`).join("")}</ul></div>` : ""}`;

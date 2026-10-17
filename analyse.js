@@ -223,7 +223,10 @@ export function suggest(x, sessions, sets, exceptSession, ctx = {}) {
 export function bodyTrend(body, now = Date.now()) {
   const rows = (body ?? []).filter((r) => r.weight_kg != null).map((r) => ({ t: Date.parse(r.on_date + "T12:00"), w: Number(r.weight_kg) })).sort((a, b) => a.t - b.t);
   const mean = (from, to) => avg(rows.filter((r) => r.t > from && r.t <= to).map((r) => r.w));
-  const cur = mean(now - 7 * DAY, now), prev = mean(now - 14 * DAY, now - 7 * DAY);
+  // Bis Tagesende zählen, sonst fehlt das Morgengewicht (Zeitstempel 12:00) bis mittags
+  const end = new Date(now); end.setHours(23, 59, 59, 999);
+  const until = end.getTime();
+  const cur = mean(until - 7 * DAY, until), prev = mean(until - 14 * DAY, until - 7 * DAY);
   const latest = rows[rows.length - 1]?.w ?? null;
   const waist = (body ?? []).filter((r) => r.waist_cm != null).sort((a, b) => a.on_date.localeCompare(b.on_date));
   const w0 = waist.length ? Number(waist[0].waist_cm) : null, w1 = waist.length ? Number(waist[waist.length - 1].waist_cm) : null;
@@ -283,14 +286,18 @@ export function analyse({ exercises, sessions, sets, body = [], now = Date.now()
 
   // Wochen (Mo–So, letzte 6): Trainingstage, Minuten, harte Sätze, Last (Anstrengung × Minuten)
   const monday = (t) => { const d = new Date(t); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.getTime(); };
-  const weeks = [];
-  for (let k = 5; k >= 0; k--) {
-    const from = monday(now) - k * 7 * DAY, to = from + 7 * DAY;
+  const allWeeks = []; // 10 Wochen für die Serie, angezeigt werden die letzten 6
+  for (let k = 9; k >= 0; k--) {
+    // Kalendertage statt fester 24 Std., sonst verrutscht die Woche bei der Zeitumstellung
+    const m = new Date(monday(now)); m.setDate(m.getDate() - 7 * k);
+    const from = m.getTime(); m.setDate(m.getDate() + 7);
+    const to = m.getTime();
     const ws = stats.filter((s) => s.start >= from && s.start < to);
-    weeks.push({ from, days: new Set(ws.map((s) => s.date)).size, minutes: ws.reduce((a, s) => a + s.minutes, 0), sets: ws.reduce((a, s) => a + s.sets, 0), hard: ws.reduce((a, s) => a + s.hard, 0), load: ws.reduce((a, s) => a + (s.load ?? 0), 0), volume: ws.reduce((a, s) => a + s.volume, 0) });
+    allWeeks.push({ from, days: new Set(ws.map((s) => s.date)).size, minutes: ws.reduce((a, s) => a + s.minutes, 0), sets: ws.reduce((a, s) => a + s.sets, 0), hard: ws.reduce((a, s) => a + s.hard, 0), load: ws.reduce((a, s) => a + (s.load ?? 0), 0), volume: ws.reduce((a, s) => a + s.volume, 0) });
   }
+  const weeks = allWeeks.slice(-6);
   let streak = 0;
-  for (let i = weeks.length - 1; i >= 0; i--) { if (weeks[i].days >= 2) streak++; else if (i < weeks.length - 1) break; }
+  for (let i = allWeeks.length - 1; i >= 0; i--) { if (allWeeks[i].days >= 2) streak++; else if (i < allWeeks.length - 1) break; }
 
   const lastDone = stats[0] ?? null;
   const restDays = lastDone ? Math.floor((now - lastDone.start) / DAY) : null;

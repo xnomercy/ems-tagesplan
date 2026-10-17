@@ -35,6 +35,7 @@ const VIEW_WORDS = [
   ["vorrat", rx(`vorr(?:a|ä)t${W}|supplement${W}|stok${W}|takviye${W}`)],
   ["rueckblick", rx(`(?:wochen)?rückblick${W}|wochenbilanz|haftalık özet${W}|haftanın özeti|özet${W}`)],
   ["fristen", rx(`frist${W}|verträge|vertrag${W}|süre${W}|sözleşme${W}`)],
+  ["zikir", rx(`zikir${W}|zikr${W}|dhikr${W}|tesbih${W}|tespih${W}`)],
   ["glaube", rx(`koran${W}|quran|kuran${W}|kur'an${W}|ramadan${W}|ramazan${W}|fasten${W}|oruç${W}`)],
   ["termine", rx(`termine|aufgaben|kalender|randevu${W}|görev${W}|takvim${W}`)],
   ["plan", rx(`routinen|rutin${W}`)],
@@ -118,7 +119,7 @@ export function parseIntent(text, now = new Date(), targets = [], lang = "de", s
   const body = bodyIntent(s);
   if (body && !isNew) return body;
 
-  const ex = RE.erinnerung.test(s) ? null : extraIntent(s, now, lang);
+  const ex = RE.erinnerung.test(s) ? null : extraIntent(s, now, lang, isNew);
   if (ex) return ex;
 
   const tr = RE.erinnerung.test(s) || isNew ? null : trainingIntent(s, training);
@@ -445,13 +446,29 @@ function trainingIntent(s, { exercises = [], workouts = [], running = false } = 
 // Wasser, Koran, Fasten, Ramadan, Schlaf, Barcode und Fristen
 const NUM = (w) => (w == null ? 1 : /\d/.test(w) ? Number(w.replace(",", ".")) : ZAHL[w.toLowerCase()] ?? 1);
 const NUMW = `(\\d+(?:[.,]\\d+)?|${Object.keys(ZAHL).join("|")})`;
-function extraIntent(s, now, lang) {
+function extraIntent(s, now, lang, isNew = false) {
   let m;
+  // „Leg Aufgabe an Unterlagen scannen“ oder „Termin morgen 10 Uhr Brief lesen“ legt etwas an statt Scanner/Import zu öffnen
+  const creates = isNew || (rx(`termin${W}|aufgabe${W}|randevu${W}|görev${W}`).test(s) && /\d|morgen|heute|yarın|bugün|^\s*(?:leg|trag|neue?)\b/i.test(s));
   // Dokument: "Brief scannen", "Termin aus PDF übernehmen", "belge oku", "mektubu tara"
   if (rx(`brief${W}|dokument${W}|pdf|foto${W}|bild${W}|schreiben|belge${W}|mektub?${W}|evrak${W}|fotoğraf${W}|resim${W}`).test(s)
-    && rx(`scann${W}|einles${W}|lies${W}|lesen|import${W}|auswert${W}|übernehm${W}|übernimm|tara${W}|oku${W}|yükle${W}|aktar${W}`).test(s)) return { type: "import" };
+    && rx(`scann${W}|einles${W}|lies${W}|lesen|import${W}|auswert${W}|übernehm${W}|übernimm|tara${W}|oku${W}|yükle${W}|aktar${W}`).test(s) && !creates) return { type: "import" };
   // Barcode: "scanne Barcode", "ist das halal", "barkod tara"
-  if (rx(`barcode${W}|strichcode${W}|scann${W}|barkod${W}|tara(?:t|yın)?`).test(s) || rx(`ist (?:das|es) halal|helal mi`).test(s)) return { type: "scan" };
+  if (!creates && (rx(`barcode${W}|strichcode${W}|scann${W}|barkod${W}|tara(?:t|yın)?`).test(s) || rx(`ist (?:das|es) halal|helal mi`).test(s))) return { type: "scan" };
+
+  // Zikir: "1000 Zikir gemacht", "5 tausend Zikir", "wie viel Zikir", "Zikir-Ziel 6000", "Zikir gestern 3000", "bin zikir çektim"
+  // „Öffne Zikir“ ohne Zahl geht an die Seitenauswahl weiter
+  if (rx(`zikir${W}|zikr${W}|dhikr${W}|tesbih${W}|tespih${W}|tasbih${W}`).test(s) && !(RE.zeige.test(s) && !/\d/.test(s) && !rx(`wie ?viel|ne kadar|kaç`).test(s))) {
+    const k = s.match(/(\d+(?:[.,]\d+)?)\s*(?:tausend|bin)\b/iu);
+    const d = s.match(/\d{1,3}(?:[.\s]\d{3})+|\d+/u);
+    const n = k ? Math.round(Number(k[1].replace(",", ".")) * 1000) : /(?:^|\s)(?:tausend|bin)(?:\s|$)/iu.test(s) ? 1000 : d ? Number(d[0].replace(/\D/g, "")) : null;
+    const back = /gestern|dün/iu.test(s) ? -1 : 0;
+    const date = back ? (() => { const x = new Date(now); x.setDate(x.getDate() + back); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; })() : null;
+    if (n != null && rx(`ziel${W}|hedef${W}|pro tag|täglich|günlük|her gün`).test(s)) return { type: "zikir", action: "goal", n };
+    if (n == null || rx(`wie ?viel|stand|status|ne kadar|kaç`).test(s) && !/\d/.test(s)) return { type: "zikir", action: "status" };
+    if (rx(`insgesamt|stand|auf|toplam|olarak`).test(s)) return { type: "zikir", action: "set", n, date };
+    return { type: "zikir", action: "add", n, date };
+  }
 
   // Wasser: "ein Glas Wasser", "2 Gläser Wasser getrunken", "halber Liter Wasser", "bir bardak su içtim"
   if (rx(`wasser|su(?:yu)?`).test(s) && !rx(`kauf${W}|einkauf${W}|liste${W}|alışveriş${W}|al(?:dım)?|lazım|bitti|alle`).test(s)) {

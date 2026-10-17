@@ -8,6 +8,7 @@ import { withOffline } from "./offline.js";
 import { createDayLog } from "./daylog.js";
 import { createScanner } from "./halal-scan.js";
 import { createGlaube, ramadanActive, ramadanShift } from "./glaube.js";
+import { createZikir } from "./zikir.js";
 import { createWellness, sleepOffset } from "./wellness.js";
 import { createDeadlines } from "./fristen.js";
 import { createReview } from "./rueckblick.js";
@@ -17,10 +18,14 @@ const SUPABASE_URL = "https://hpxdhtuabzqwyslzcmbt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kKiQdntJd893YvBPFx7fhw_FYzlwwtz";
 const DEMO = new URLSearchParams(location.search).has("demo");
 // Bei jeder Veröffentlichung zusammen mit version.json und dem Cache-Namen in sw.js hochzählen
-const APP_VERSION = "29";
+const APP_VERSION = "30";
 const rawDb = DEMO
   ? (await import("./mock.js")).db
-  : (await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm")).createClient(SUPABASE_URL, SUPABASE_KEY);
+  : (await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm").catch((e) => {
+    // Ohne Netz und ohne gespeicherte Bibliothek: Hinweis statt weißem Bildschirm
+    document.body.insertAdjacentHTML("beforeend", `<p style="padding:40px 24px;text-align:center">${t("Keine Verbindung. Öffne die App einmal mit Internet, danach geht sie auch offline.")}</p>`);
+    throw e;
+  })).createClient(SUPABASE_URL, SUPABASE_KEY);
 // Ohne Netz: Änderungen warten in einer Schlange und gehen raus, sobald wieder Netz da ist
 const db = withOffline(rawDb, { onChange: (n, res) => onOutbox(n, res) });
 
@@ -98,7 +103,16 @@ async function boot() {
   });
   state.user = data.session?.user ?? null;
   showScreen();
-  if ("serviceWorker" in navigator && !DEMO) navigator.serviceWorker.register("sw.js").catch(() => {});
+  if ("serviceWorker" in navigator && !DEMO) {
+    const first = !navigator.serviceWorker.controller;
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+    // Beim allerersten Öffnen lief Supabase & Co. noch am Service Worker vorbei: einmal nachladen, damit sie offline da sind
+    if (first) navigator.serviceWorker.addEventListener("controllerchange", () => {
+      for (const r of performance.getEntriesByType("resource")) {
+        if (/^https:\/\/(cdn\.jsdelivr\.net|fonts\.googleapis\.com|fonts\.gstatic\.com)\//.test(r.name)) fetch(r.name, { mode: r.name.includes("jsdelivr") ? "cors" : "no-cors" }).catch(() => {});
+      }
+    }, { once: true });
+  }
 }
 
 async function showScreen() {
@@ -149,11 +163,13 @@ async function prayerTimes(date) {
   if (DEMO) return { Imsak: "05:48", Fajr: "05:58", Dhuhr: "13:21", Asr: "16:19", Maghrib: "18:41", Isha: "20:13", HijriMonth: new URLSearchParams(location.search).has("ramadan") ? 9 : 4, HijriDay: 12 };
   if (!s || s.lat == null) return null;
   const key = `pt2:${isoDate(date)}:${s.lat.toFixed(2)}:${s.lng.toFixed(2)}:${s.prayer_method}`;
-  try { const c = localStorage.getItem(key); if (c) return JSON.parse(c); } catch {}
+  try { const c = JSON.parse(localStorage.getItem(key) || "null"); if (c?.Fajr) return c; } catch {}
   try {
     const d = `${String(date.getDate()).padStart(2, "0")}-${String(date.getMonth() + 1).padStart(2, "0")}-${date.getFullYear()}`;
     const res = await fetch(`https://api.aladhan.com/v1/timings/${d}?latitude=${s.lat}&longitude=${s.lng}&method=${s.prayer_method}`);
-    const j = (await res.json()).data;
+    const j = res.ok ? (await res.json()).data : null;
+    // Fehlerantworten nicht speichern, sonst bleibt der Tag ohne Zeiten
+    if (!j?.timings?.Fajr) return null;
     // Hidschri-Monat mitmerken: 9 = Ramadan
     const tm = { ...j.timings, HijriMonth: j.date?.hijri?.month?.number ?? null, HijriDay: Number(j.date?.hijri?.day) || null };
     try { localStorage.setItem(key, JSON.stringify(tm)); } catch {}
@@ -222,9 +238,9 @@ async function refresh() {
 // Uhrzeit einer Routine: Gebetszeit, an ein Gebet gekoppelt oder fest
 const PRAYER_NAMES = { fajr: "Fajr", dhuhr: "Dhuhr", asr: "Asr", maghrib: "Maghrib", isha: "Isha" };
 function routineTime(rt, pt) {
-  if (rt.prayer) return pt ? pt[PRAYER_API[rt.prayer]].slice(0, 5) : null;
+  if (rt.prayer) return pt?.[PRAYER_API[rt.prayer]]?.slice(0, 5) ?? null;
   if (rt.anchor_prayer) {
-    if (!pt) return null;
+    if (!pt?.[PRAYER_API[rt.anchor_prayer]]) return null;
     const [h, m] = pt[PRAYER_API[rt.anchor_prayer]].slice(0, 5).split(":").map(Number);
     const off = rt.anchor_offset ?? 15;
     let t = h * 60 + m + off;
@@ -249,7 +265,7 @@ function render() {
   if (state.view !== "heute") $("#greeting").textContent = t(PAGES[state.view]?.label ?? "");
   ({ heute: renderDay, plan: renderPlan, termine: renderTermine, mehr: renderMehr, vorrat: renderVorrat,
     training: () => training.render($("#view-training")), einkauf: () => shopping.render($("#view-einkauf")),
-    glaube: () => glaube.render($("#view-glaube")), fristen: () => deadlines.load().then(() => deadlines.render($("#view-fristen"))),
+    glaube: () => glaube.render($("#view-glaube")), zikir: () => zikir.render($("#view-zikir")), fristen: () => deadlines.load().then(() => deadlines.render($("#view-fristen"))),
     rueckblick: () => review.render($("#view-rueckblick")) })[state.view]();
   updateNav();
 }
@@ -312,6 +328,7 @@ function renderDay() {
   if (isToday) {
     if (db.pending()) html += `<div class="hint">${t("Offline: {n} Änderungen warten aufs Netz", { n: db.pending() })}</div>`;
     html += glaube.dayCard();
+    html += zikir.dayCard();
     html += wellness.waterCard();
     html += glaube.dayHint();
     html += wellness.sleepHint();
@@ -329,7 +346,7 @@ function renderDay() {
   if (pressing.length && !shopDay) html += `<div class="hint warn">${t("Einkaufen: {x}", { x: pressing.slice(0, 4).map((x) => esc(x.name)).join(", ") + (pressing.length > 4 ? " …" : "") })} <button data-open-shop>${t("Öffnen")}</button></div>`;
   if (shopOpen?.length && shopDay) {
     const byStore = Object.entries(shopOpen.reduce((a, x) => ((a[x.store] = (a[x.store] ?? 0) + 1), a), {}));
-    html += `<div class="hint">${t("Einkaufsliste: {n} offen", { n: shopOpen.length })}${byStore.length > 1 ? " (" + byStore.map(([k, n]) => `${t(STORES[k] ?? k)} ${n}`).join(", ") + ")" : ""} <button data-open-shop>${t("Öffnen")}</button></div>`;
+    html += `<div class="hint">${t("Einkaufsliste: {n} offen", { n: shopOpen.length })}${byStore.length > 1 ? " (" + byStore.map(([k, n]) => `${esc(t(STORES[k] ?? k))} ${n}`).join(", ") + ")" : ""} <button data-open-shop>${t("Öffnen")}</button></div>`;
   }
   const low = lowSupplies();
   if (isToday && low.length) html += `<div class="hint warn">${t("Vorrat")}: ${low.map((x) => `${esc(x.name)} ${supplyDays(x) <= 0 ? t("leer") : t("noch {n} Tage", { n: supplyDays(x) })}`).join(", ")} <button data-goto="vorrat">${t("Ansehen")}</button></div>`;
@@ -429,7 +446,7 @@ function listHtml() {
   const aufgaben = shown.filter((i) => i.kind === "aufgabe" && !i.done);
   const used = [...new Set(data.map((i) => i.area).filter(Boolean))];
   let html = used.length ? `<div class="chips">${[["", t("Alle")], ...used.map((a) => [a, AREAS[a] ?? a])]
-    .map(([v, n]) => `<button class="chip ${f === v ? "on" : ""}" data-area="${v}">${n}</button>`).join("")}</div>` : "";
+    .map(([v, n]) => `<button class="chip ${f === v ? "on" : ""}" data-area="${esc(v)}">${esc(n)}</button>`).join("")}</div>` : "";
   html += `<div class="section-head"><h3>${t("Kommende Termine")}</h3></div>`;
   if (!termine.length) html += `<div class="empty">${t("Keine Termine.")}</div>`;
   let last = "";
@@ -517,11 +534,16 @@ function renderVorrat() {
   $("#sup-add").onclick = () => openSupplySheet();
 }
 
+const MEHR_TABS = [["allgemein", "Allgemein"], ["gebet", "Gebet"], ["kalender", "Kalender"], ["konto", "Konto"]];
+try { state.mehrTab = localStorage.getItem("tagesplan-mehr-tab"); } catch {}
 function renderMehr() {
   const s = state.settings ?? {};
   const feed = `${SUPABASE_URL}/functions/v1/kalender?token=${s.calendar_token}`;
+  const tab = MEHR_TABS.some(([k]) => k === state.mehrTab) ? state.mehrTab : "allgemein";
+  const grp = (k) => `<div class="mehr-group" data-group="${k}" ${tab === k ? "" : "hidden"}>`;
   $("#view-mehr").innerHTML = `
-    <div class="section-head"><h3>${t("Einstellungen")}</h3></div>
+    <div class="seg mehr-tabs" id="mehr-tabs" role="tablist">${MEHR_TABS.map(([k, n]) => `<button type="button" role="tab" data-mtab="${k}" class="${tab === k ? "on" : ""}" aria-selected="${tab === k}">${t(n)}</button>`).join("")}</div>
+    ${grp("allgemein")}
     <div class="card">
       <p class="eyebrow">${t("Sprache")}</p>
       <div class="seg" id="lang-seg">
@@ -544,6 +566,8 @@ function renderMehr() {
       <form><select id="nag">${[10, 15, 20, 30, 45, 60].map((m) => `<option value="${m}" ${(s.nag_minutes ?? 20) === m ? "selected" : ""}>${t("{n} Minuten", { n: m })}</option>`).join("")}</select></form>
       <p class="small muted">${t("Gebete erinnern bis zum nächsten Gebet, Wichtiges bis du es abhakst (höchstens 5 Std., nachts ab 23:30 ist Ruhe).")}</p>
     </div>
+    </div>
+    ${grp("gebet")}
     <div class="card">
       <p class="eyebrow">${t("Gebetszeiten")}</p>
       <p>${s.lat != null ? t("Standort gesetzt ({x}).", { x: `${s.lat.toFixed(2)}, ${s.lng.toFixed(2)}` }) : t("Noch kein Standort gesetzt.")}</p>
@@ -554,6 +578,15 @@ function renderMehr() {
           .map(([v, n]) => `<option value="${v}" ${s.prayer_method === v ? "selected" : ""}>${t(n)}</option>`).join("")}
       </select></form>
     </div>
+    <div class="card">
+      <p class="eyebrow">${t("Zikir")}</p>
+      <label class="small muted" style="display:block">${t("Tagesziel")}</label>
+      <form id="zikr-goal-form" class="shop-add"><input id="zikr-goal" inputmode="numeric" pattern="[0-9]*" value="${zikir.goal()}" autocomplete="off"><button type="submit" class="primary" aria-label="${t("Speichern")}">✓</button></form>
+      <p class="small muted">${t("Gilt ab heute. Frühere Tage behalten ihr altes Ziel in der Statistik.")}</p>
+      <button type="button" class="btn" data-goto="zikir">${t("Zur Zikir-Seite")}</button>
+    </div>
+    </div>
+    ${grp("kalender")}
     <div class="dark-block">
       <p class="eyebrow">${t("Kalender verknüpfen")}</p>
       <p>${t("Abonniere diesen Link in deinem Kalender. Termine, Routinen und Gebetszeiten erscheinen dort mit Erinnerung und aktualisieren sich von selbst.")}</p>
@@ -564,6 +597,13 @@ function renderMehr() {
       <button class="btn fill" id="open-feed">${t("Im Kalender öffnen")}</button>
       <button class="btn" id="copy-feed">${t("Link kopieren")}</button>
     </div>
+    <div class="card">
+      <p class="eyebrow">${t("Homescreen-Widget")}</p>
+      <p class="small">${t("Nächstes Gebet und nächste Aufgabe auf dem Homescreen, über die kostenlose App Scriptable.")}</p>
+      <button class="btn fill" id="widget-setup">${t("Widget einrichten")}</button>
+    </div>
+    </div>
+    ${grp("konto")}
     <div class="card">
       <p class="eyebrow">${t("Passwort ändern")}</p>
       <form id="pw-form">
@@ -577,6 +617,8 @@ function renderMehr() {
       <p class="small" id="lock-state">${lockId() ? t("Beim Öffnen fragt die App nach Face ID.") : t("Sperrt die App beim Öffnen und nach einer Minute im Hintergrund. Entsperren mit Face ID oder Code des iPhones.")}</p>
       <button class="btn ${lockId() ? "" : "fill"}" id="lock-toggle">${t(lockId() ? "App-Sperre ausschalten" : "Mit Face ID sperren")}</button>
     </div>
+    </div>
+    ${grp("allgemein")}
     <div class="card">
       <p class="eyebrow">${t("Wasser und Schlaf")}</p>
       <label class="small muted" style="display:block">${t("Wasser pro Tag")}</label>
@@ -585,17 +627,26 @@ function renderMehr() {
       <form><select id="sleep-h">${[6, 6.5, 7, 7.5, 8, 8.5, 9].map((n) => `<option value="${n}" ${Number(s.sleep_hours ?? 7.5) === n ? "selected" : ""}>${t("{n} Std.", { n: n.toLocaleString(LOCALE()) })}</option>`).join("")}</select></form>
       <p class="small muted">${t("Die Schlafenszeit richtet sich nach Fajr: 15 Minuten vorher aufstehen, frühestens nach Isha ins Bett.")}</p>
     </div>
-    <div class="card">
-      <p class="eyebrow">${t("Homescreen-Widget")}</p>
-      <p class="small">${t("Nächstes Gebet und nächste Aufgabe auf dem Homescreen, über die kostenlose App Scriptable.")}</p>
-      <button class="btn fill" id="widget-setup">${t("Widget einrichten")}</button>
     </div>
+    ${grp("konto")}
     <div class="card">
       <p class="eyebrow">${t("Deine Daten")}</p>
       <p class="small">${t("Alles als Datei sichern: Routinen, Termine, Training, Körperwerte, Einkäufe, Fristen und Tageswerte.")}</p>
       <button class="btn" id="export">${t("Daten exportieren")}</button>
     </div>
-    <div class="card"><p class="small muted">${t("Angemeldet als {x}", { x: esc(state.user?.email) })}</p><button class="btn danger" id="logout">${t("Abmelden")}</button></div>`;
+    <div class="card"><p class="small muted">${t("Angemeldet als {x}", { x: esc(state.user?.email) })}</p><button class="btn danger" id="logout">${t("Abmelden")}</button></div>
+    </div>`;
+  document.querySelectorAll("#mehr-tabs [data-mtab]").forEach((b) => (b.onclick = () => {
+    state.mehrTab = b.dataset.mtab;
+    try { localStorage.setItem("tagesplan-mehr-tab", state.mehrTab); } catch {}
+    renderMehr();
+  }));
+  $("#zikr-goal-form").onsubmit = async (e) => {
+    e.preventDefault();
+    $("#zikr-goal").blur();
+    const r = await zikir.setGoal(Number($("#zikr-goal").value.replace(/\D/g, "")) || 0);
+    toast(r.msg);
+  };
   $("#pw-form").onsubmit = async (e) => {
     e.preventDefault();
     const pw = $("#pw-new").value;
@@ -628,7 +679,7 @@ function renderMehr() {
 
 // ---------- Supplement-Vorrat ----------
 const fmtNum = (n) => (Math.round(n * 10) / 10).toLocaleString(LOCALE());
-const daysSince = (iso) => Math.max(0, Math.floor((Date.parse(isoDate(new Date()) + "T12:00") - Date.parse(iso + "T12:00")) / 864e5));
+const daysSince = (iso) => Math.max(0, Math.round((Date.parse(isoDate(new Date()) + "T12:00") - Date.parse(iso + "T12:00")) / 864e5));
 const supplyLeft = (x) => Math.max(0, Number(x.stock) - Number(x.per_day) * daysSince(x.counted_on));
 const supplyDays = (x) => (Number(x.per_day) > 0 ? Math.floor(supplyLeft(x) / Number(x.per_day)) : Infinity);
 const lowSupplies = () => (state.supplies ?? []).filter((x) => supplyDays(x) <= (x.warn_days ?? 7));
@@ -805,7 +856,7 @@ document.addEventListener("click", async (ev) => {
 // Plus oben legt je nach Seite das Passende an
 $("#add").onclick = () => ({
   einkauf: () => shopping.openNew(), training: () => training.newExercise(), vorrat: () => openSupplySheet(), plan: () => openRoutineSheet(),
-  glaube: () => glaube.openAdd(), fristen: () => deadlines.openEdit(),
+  glaube: () => glaube.openAdd(), zikir: () => zikir.openAdd(), fristen: () => deadlines.openEdit(),
 }[state.view] ?? (() => openItemSheet()))();
 $("#greeting").onclick = () => { state.day = new Date(); switchView("heute"); };
 
@@ -820,13 +871,14 @@ const ICON = {
   einkauf: '<path d="M3 4h2.5l2.2 11.2a1.5 1.5 0 0 0 1.5 1.3h8.6a1.5 1.5 0 0 0 1.5-1.2L21 8H6.3"/><circle cx="9.5" cy="20" r="1.3"/><circle cx="17.5" cy="20" r="1.3"/>',
   vorrat: '<rect x="7" y="3" width="10" height="4" rx="1"/><path d="M8 7h8v12a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2z"/><path d="M8 12h8"/>',
   glaube: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/><path d="M14.5 7.2a3 3 0 1 0 0 5.6 3.6 3.6 0 1 1 0-5.6z"/>',
+  zikir: '<circle cx="12" cy="4.5" r="1.8"/><circle cx="17.3" cy="7.6" r="1.8"/><circle cx="17.3" cy="13.7" r="1.8"/><circle cx="12" cy="16.8" r="1.8"/><circle cx="6.7" cy="13.7" r="1.8"/><circle cx="6.7" cy="7.6" r="1.8"/><path d="M12 18.6V22"/>',
   fristen: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4"/><path d="M14 3v5h5M19 8v2"/><circle cx="17" cy="17" r="4"/><path d="M17 15.5V17l1 1"/>',
   rueckblick: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   mehr: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
 };
 const PAGES = {
   heute: { label: "Tag" }, termine: { label: "Termine" }, plan: { label: "Routinen" }, training: { label: "Training" },
-  einkauf: { label: "Einkauf" }, vorrat: { label: "Supplement-Vorrat" }, glaube: { label: "Koran & Ramadan" }, fristen: { label: "Fristen & Verträge" },
+  einkauf: { label: "Einkauf" }, vorrat: { label: "Supplement-Vorrat" }, glaube: { label: "Koran & Ramadan" }, zikir: { label: "Zikir" }, fristen: { label: "Fristen & Verträge" },
   rueckblick: { label: "Wochenrückblick" }, mehr: { label: "Einstellungen" },
 };
 function navCount(k) {
@@ -865,6 +917,7 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeNav()
   $("#sidenav").addEventListener("touchend", (e) => { if (x0 != null && e.changedTouches[0].clientX - x0 > 60) closeNav(); x0 = null; });
 }
 function switchView(v) {
+  if (state.view === "zikir" && v !== "zikir") zikir.flush();
   state.view = v;
   document.querySelectorAll(".tabs > button").forEach((b) => b.classList.toggle("active", b.dataset.view === v));
   for (const name of Object.keys(PAGES)) $(`#view-${name}`).hidden = name !== v;
@@ -920,7 +973,7 @@ function openDetail(e) {
   const isRoutine = e.kind === "routine";
   const kindLabel = e.kind === "termin" ? t("Termin") : e.kind === "aufgabe" ? t("Aufgabe") : CATEGORIES[e.category] ?? t("Routine");
   const when = isRoutine
-    ? `${raw.days?.length === 7 ? t("Täglich") : (raw.days ?? []).map((d) => DAY_SHORT[d - 1]).join(", ")}${e.time ? " · " + e.time : ""}${raw.anchor_prayer ? ` (${PRAYER_NAMES[raw.anchor_prayer]} +${raw.anchor_offset})` : raw.prayer ? ` (${t("Gebetszeit")})` : ""}`
+    ? `${raw.days?.length === 7 ? t("Täglich") : (raw.days ?? []).map((d) => DAY_SHORT[d - 1]).join(", ")}${e.time ? " · " + e.time : ""}${raw.anchor_prayer ? ` (${routineWhen(raw)})` : raw.prayer ? ` (${t("Gebetszeit")})` : ""}`
     : `${fmtDay(raw.on_date, { weekday: "long", day: "numeric", month: "long" })}${raw.start_time ? " · " + hhmm(raw.start_time) : ""}${raw.end_time ? "–" + hhmm(raw.end_time) : ""}`;
   const remind = raw.remind_before ? (raw.remind_before >= 60 ? t("{n} Std. vorher", { n: raw.remind_before / 60 }) : t("{n} Min. vorher", { n: raw.remind_before })) : null;
   const rows = [
@@ -1070,7 +1123,7 @@ function openRoutineSheet(r = {}) {
     </select>
     <div class="row">
       <div id="fix-time" ${rt.anchor_prayer ? "hidden" : ""}><label>${t("Uhrzeit")}</label><input name="at_time" type="time" value="${hhmm(rt.at_time)}"></div>
-      <div id="anchor-off" ${rt.anchor_prayer ? "" : "hidden"}><label>${t("Minuten danach")}</label><input name="anchor_offset" type="number" min="0" max="240" step="5" value="${rt.anchor_offset ?? 15}"></div>
+      <div id="anchor-off" ${rt.anchor_prayer ? "" : "hidden"}><label>${t("Minuten danach (minus = vorher)")}</label><input name="anchor_offset" type="number" min="-720" max="720" step="5" value="${rt.anchor_offset ?? 15}"></div>
     </div>`}
     ${prioSeg(rt.priority)}
     <label>${t("Wiederholen an")}</label>
@@ -1219,6 +1272,7 @@ const daylog = createDayLog(db);
 const common = { db, t, esc, $, toast, openSheet, closeSheet, sheet, form, fmtDay, LOCALE, enhancePickers: (f) => enhancePickers(f), today: () => isoDate(new Date()), onChange: () => render() };
 const glaube = createGlaube({ ...common, daylog, settings: () => state.settings, saveSettings, getPt: () => state.pt });
 const wellness = createWellness({ ...common, daylog, settings: () => state.settings, getPt: () => state.pt });
+const zikir = createZikir({ ...common, daylog, settings: () => state.settings, saveSettings });
 const deadlines = createDeadlines({ ...common, onChange: () => { state.upcoming = null; refresh(); }, onImport: () => importer.open() });
 const importer = createImport({ ...common, deadlines, lang: () => LANG, openItemSheet: (a, b) => openItemSheet(a, b), onChange: () => { state.upcoming = null; refresh(); } });
 const review = createReview({ ...common, daylog, routines: () => state.routines, settings: () => state.settings, budget: () => null });
@@ -1300,6 +1354,7 @@ const EXAMPLES = {
   einkauf: ["Milch, 6 Eier und 500 g Hack auf die Einkaufsliste", "Milch gekauft", "Scanne Barcode"],
   vorrat: ["Magnesium aufgefüllt 60", "Wie lange reicht Magnesium", "Noch 40 Ashwagandha"],
   glaube: ["Koran 5 Seiten gelesen", "Koran-Ziel bis 30. März", "Heute gefastet"],
+  zikir: ["1000 Zikir gemacht", "Wie viel Zikir heute", "Zikir-Ziel 6000"],
   fristen: ["TÜV am 12.3.2027", "Handyvertrag endet am 1.8.2027 Kündigungsfrist 3 Monate", "Brief scannen"],
   rueckblick: ["Zeig den Wochenrückblick", "Wann soll ich schlafen", "2 Gläser Wasser"],
   mehr: ["Sprich Türkisch", "Dunkler Modus", "Schlafziel 8 Stunden"],
@@ -1312,6 +1367,7 @@ const EXAMPLES_TR = {
   einkauf: ["Alışveriş listesine süt ve yumurta ekle", "Süt aldım", "Barkod tara"],
   vorrat: ["Magnezyum doldurdum 60", "Magnezyum ne kadar yeter", "40 tane ashwagandha kaldı"],
   glaube: ["Kuran 5 sayfa okudum", "Kuran hatmi 30 mart'a kadar", "Oruç tuttum"],
+  zikir: ["1000 zikir çektim", "Bugün ne kadar zikir", "Zikir hedefi 6000"],
   fristen: ["Muayene 12.3.2027", "Telefon sözleşmesi 1.8.2027 fesih süresi 3 ay", "Belge oku"],
   rueckblick: ["Haftalık özeti göster", "Ne zaman yatmalıyım", "2 bardak su"],
   mehr: ["Almancaya geç", "Koyu mod", "Uyku hedefi 8 saat"],
@@ -1420,13 +1476,20 @@ function describe(cmd) {
   if (cmd.type === "sprache") return [t("Sprache"), cmd.lang === "tr" ? "Türkçe" : "Deutsch"];
   if (cmd.type === "theme") return [t("Darstellung"), t({ auto: "Automatisch", light: "Hell", dark: "Dunkel" }[cmd.theme])];
   if (cmd.type === "gruppe") return [t("Routinen"), t(cmd.g === "zeit" ? "Nach Tageszeit" : "Nach Bereich")];
-  if (cmd.type === "zeige") return [t("Anzeigen"), cmd.date ? fmtDay(cmd.date, { weekday: "long", day: "numeric", month: "long" }) : t({ heute: "Tag", termine: "Termine", plan: "Routinen", mehr: "Einstellungen", monat: "Monat", verlauf: "Verlauf", vorrat: "Supplement-Vorrat", training: "Training", einkauf: "Einkaufsliste", glaube: "Koran & Ramadan", fristen: "Fristen & Verträge", rueckblick: "Wochenrückblick" }[cmd.view])];
+  if (cmd.type === "zeige") return [t("Anzeigen"), cmd.date ? fmtDay(cmd.date, { weekday: "long", day: "numeric", month: "long" }) : t({ heute: "Tag", termine: "Termine", plan: "Routinen", mehr: "Einstellungen", monat: "Monat", verlauf: "Verlauf", vorrat: "Supplement-Vorrat", training: "Training", einkauf: "Einkaufsliste", glaube: "Koran & Ramadan", zikir: "Zikir", fristen: "Fristen & Verträge", rueckblick: "Wochenrückblick" }[cmd.view])];
   if (cmd.type === "suche") return [t("Suche"), cmd.q];
   if (cmd.type === "wasser") return [t("Wasser"), cmd.action === "status" ? t("Stand anzeigen") : t("+{n} Gläser ({l} l)", { n: cmd.n, l: wellness.liters(cmd.n) })];
   if (cmd.type === "scan") return [t("Packung scannen"), t("Halal-Prüfung")];
   if (cmd.type === "import") return [t("Dokument"), t("Termine aus Foto, PDF oder Text übernehmen")];
   if (cmd.type === "schlaf") return [t("Schlaf"), cmd.action === "set" ? t("Ziel {n} Std.", { n: cmd.hours }) : t("Schlafenszeit anzeigen")];
   if (cmd.type === "frist") return [t("Frist"), `${cmd.title} · ${fmtDay(cmd.due, { day: "numeric", month: "short", year: "numeric" })}${cmd.notice ? " · " + t("{n} Monate Kündigungsfrist", { n: cmd.notice }) : ""}`];
+  if (cmd.type === "zikir") {
+    const f = (n) => Number(n).toLocaleString(LOCALE());
+    if (cmd.action === "add") return [t("Zikir"), "+" + f(cmd.n)];
+    if (cmd.action === "set") return [t("Zikir"), t("Tagesstand {n}", { n: f(cmd.n) })];
+    if (cmd.action === "goal") return [t("Zikir-Tagesziel"), f(cmd.n)];
+    return [t("Zikir"), t("Stand anzeigen")];
+  }
   if (cmd.type === "glaube") {
     if (cmd.action === "pages") return [t("Koran"), t("+{n} Seiten", { n: cmd.pages })];
     if (cmd.action === "page") return [t("Koran"), t("Seite {p}", { p: cmd.page })];
@@ -1553,7 +1616,7 @@ async function runIntent(c) {
   switch (c.type) {
     case "hilfe": return openHelp();
     case "sprache":
-      setLang(c.lang); render(); saveSettings({ lang: LANG });
+      setLang(c.lang); $("#view-termine").innerHTML = ""; render(); saveSettings({ lang: LANG });
       return toast(c.lang === "tr" ? "Dil: Türkçe" : "Sprache: Deutsch");
     case "theme":
       setTheme(c.theme);
@@ -1585,6 +1648,11 @@ async function runIntent(c) {
       toast(r.msg, async () => { await r.undo(); render(); });
       return render();
     }
+    case "zikir": {
+      const r = await zikir.runVoice(c);
+      if (r?.msg) toast(r.msg, r.undo ? async () => { await r.undo(); render(); } : null);
+      return render();
+    }
     case "glaube": {
       const r = await glaube.runVoice(c);
       if (r?.msg) toast(r.msg, r.undo ? async () => { await r.undo(); render(); } : null);
@@ -1614,7 +1682,7 @@ async function runIntent(c) {
       let x = c.supply;
       if (c.mode === "info") return toast(`${x.name}: ${fmtNum(supplyLeft(x))} ${t(x.unit)} · ${supplyDays(x) <= 0 ? t("leer") : t("reicht {n} Tage", { n: supplyDays(x) })}`);
       if (!x) {
-        const { data, error } = await db.from("supplies").insert({ name: c.name, stock: 0, per_day: 1 }).select().single();
+        const { data, error } = await db.from("supplies").insert({ name: c.name, stock: 0, per_day: 1, counted_on: isoDate(new Date()) }).select().single();
         if (error) return toast(error.message);
         x = data;
       }
@@ -1836,13 +1904,16 @@ let toastTimer;
 function toast(msg, undo) {
   const el = $("#toast");
   el.innerHTML = `<span>${esc(msg)}</span>${undo ? `<button>${t("Rückgängig")}</button>` : ""}`;
+  // Als Popover liegt der Hinweis auch über offenen Blättern (die sonst alles verdecken)
+  const hide = () => { el.hidden = true; try { el.hidePopover?.(); } catch {} };
   el.hidden = false;
-  if (undo) el.querySelector("button").onclick = () => { el.hidden = true; undo(); };
+  try { el.hidePopover?.(); el.showPopover?.(); } catch {}
+  if (undo) el.querySelector("button").onclick = () => { hide(); undo(); };
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (el.hidden = true), undo ? 6000 : 3000);
+  toastTimer = setTimeout(hide, undo ? 6000 : 3000);
 }
 
-document.addEventListener("visibilitychange", () => { if (!document.hidden && state.user) refresh(); if (!document.hidden) checkVersion(); });
+document.addEventListener("visibilitychange", () => { if (document.hidden) zikir.flush(); if (!document.hidden && state.user) refresh(); if (!document.hidden) checkVersion(); });
 
 // ---------- Hell / Dunkel ----------
 let themePref = "auto";

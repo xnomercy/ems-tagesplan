@@ -129,27 +129,38 @@ export const VERDICT = {
 // Kamera-Scanner im Blatt. BarcodeDetector, wo vorhanden, sonst ZXing (iPhone)
 export function createScanner(ctx) {
   const { t, esc, form, sheet, openSheet, closeSheet, toast, onAdd, DEMO } = ctx;
-  let stop = () => {};
+  // gen zählt Kamera-Starts; stop() erhöht ihn, damit ein noch laufender Start (langsamer ZXing-Import, Kamera-Freigabe) abbricht
+  let gen = 0;
+  const idle = () => { gen++; };
+  let stop = idle;
 
   async function startCamera(video, onCode) {
     stop();
+    const my = ++gen;
+    const live = () => my === gen && video.isConnected;
     let done = false;
-    const hit = (code) => { if (done || !/^\d{8,14}$/.test(code)) return; done = true; navigator.vibrate?.(60); stop(); onCode(code); };
+    const hit = (code) => { if (done || !live() || !/^\d{8,14}$/.test(code)) return; done = true; navigator.vibrate?.(60); stop(); onCode(code); };
     if ("BarcodeDetector" in window) {
       const formats = await BarcodeDetector.getSupportedFormats?.().catch(() => []) ?? [];
       if (formats.includes("ean_13")) {
+        if (!live()) return;
         const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
-        video.srcObject = stream; await video.play();
+        const end = () => stream.getTracks().forEach((x) => x.stop());
+        if (!live()) return end();
+        try { video.srcObject = stream; await video.play(); } catch (e) { end(); throw e; }
+        if (!live()) return end();
         const det = new BarcodeDetector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e"] });
         let timer = setInterval(async () => { try { const r = await det.detect(video); if (r[0]) hit(r[0].rawValue); } catch {} }, 250);
-        stop = () => { clearInterval(timer); stream.getTracks().forEach((x) => x.stop()); stop = () => {}; };
+        stop = () => { clearInterval(timer); end(); stop = idle; idle(); };
         return;
       }
     }
     const { BrowserMultiFormatReader } = await import("https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm");
+    if (!live()) return;
     const reader = new BrowserMultiFormatReader();
     const controls = await reader.decodeFromConstraints({ video: { facingMode: "environment" }, audio: false }, video, (res) => { if (res) hit(res.getText()); });
-    stop = () => { try { controls.stop(); } catch {} stop = () => {}; };
+    if (!live()) { try { controls.stop(); } catch {} return; }
+    stop = () => { try { controls.stop(); } catch {} stop = idle; idle(); };
   }
 
   function open() {

@@ -1,6 +1,6 @@
 // Hält die App-Dateien offline bereit. Daten kommen immer frisch von Supabase.
-const CACHE = "tagesplan-v29";
-const SHELL = ["./", "index.html", "style.css", "app.js", "parser.js", "parser-tr.js", "i18n.js", "intents.js", "training.js", "figures.js", "analyse.js", "einkauf.js", "offline.js", "daylog.js", "halal-scan.js", "glaube.js", "wellness.js", "fristen.js", "rueckblick.js", "dokument.js", "version.json", "manifest.webmanifest", "icon-192.png", "ems-logo.png", "ems-mark.png"];
+const CACHE = "tagesplan-v30";
+const SHELL = ["./", "index.html", "style.css", "app.js", "parser.js", "parser-tr.js", "i18n.js", "intents.js", "training.js", "figures.js", "analyse.js", "einkauf.js", "offline.js", "daylog.js", "halal-scan.js", "glaube.js", "wellness.js", "fristen.js", "rueckblick.js", "dokument.js", "zikir.js", "version.json", "manifest.webmanifest", "icon-192.png", "ems-logo.png", "ems-mark.png"];
 
 self.addEventListener("install", (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener("activate", (e) => e.waitUntil(
@@ -17,11 +17,11 @@ self.addEventListener("fetch", (e) => {
   if (url.origin !== location.origin) return;
   // Erst Netz, bei Funkloch der Cache
   // no-cache: immer beim Server nachfragen, ob es eine neuere Datei gibt
+  // Nur gute Antworten speichern (kein 404 während eines Deploys) und keine Adressen mit ?t=… (sonst wächst der Cache endlos)
   e.respondWith(fetch(e.request.url, { cache: "no-cache", credentials: "same-origin" }).then((res) => {
-    const copy = res.clone();
-    caches.open(CACHE).then((c) => c.put(e.request, copy));
+    if (res.ok && !url.search) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); }
     return res;
-  }).catch(() => caches.match(e.request)));
+  }).catch(() => caches.match(e.request, { ignoreSearch: true })));
 });
 
 // Push-Mitteilungen vom Server

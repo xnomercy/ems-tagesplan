@@ -1,5 +1,7 @@
 // Einkaufsliste: Artikel nach Laden und Gang sortiert, Halal-Prüfung, Vorschläge aus dem eigenen Kaufrhythmus.
 // Alles regelbasiert. Daten hängen an einer Liste (shopping_lists), damit später Familienmitglieder mitlesen können.
+// Doppeltes Tippen während des Speicherns ignorieren
+const lock = (fn) => { let busy = false; return async (...a) => { a[0]?.preventDefault?.(); if (busy) return; busy = true; try { return await fn(...a); } finally { busy = false; } }; };
 
 // Gänge in der Reihenfolge, in der man sie im Laden meist abläuft
 export const CATS = {
@@ -124,7 +126,7 @@ export const normName = (s) => low(s).replace(/\(.*?\)/g, "").replace(/[^\p{L}\d
 export function dueSuggestions(items, now = new Date()) {
   const open = new Set(items.filter((x) => !x.purchased_at).map((x) => normName(x.name)));
   const by = {};
-  for (const x of items) if (x.purchased_at) (by[normName(x.name)] ??= { x, days: new Set() }).days.add(x.purchased_at.slice(0, 10));
+  for (const x of items) if (x.purchased_at) (by[normName(x.name)] ??= { x, days: new Set() }).days.add(isoDay(new Date(x.purchased_at)));
   const out = [];
   for (const [n, { x, days }] of Object.entries(by)) {
     const fixed = Number(x.every_days) || 0;
@@ -183,10 +185,12 @@ export function createShopping(ctx) {
     return (S.loading ??= doLoad().finally(() => { S.loading = null; }));
   }
   async function doLoad() {
-    let { data: lists } = await db.from("shopping_lists").select("*").order("created_at");
+    let { data: lists, error: le } = await db.from("shopping_lists").select("*").order("created_at");
+    // Bei einem Fehler nicht als „keine Liste“ werten (sonst entsteht eine zweite Liste) und nicht endlos neu laden
+    if (le) { S.failed = le.message; return; }
     if (!lists?.length) {
       const { data, error } = await db.from("shopping_lists").insert({ name: "Einkaufsliste" }).select().single();
-      if (error) { toast(error.message); return; }
+      if (error) { S.failed = error.message; return; }
       lists = [data];
     }
     S.list = lists[0];
@@ -253,7 +257,7 @@ export function createShopping(ctx) {
     const counts = {};
     for (const x of done) counts[x.store] = (counts[x.store] ?? 0) + 1;
     store ??= Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
-    const { data: trip, error } = await db.from("shopping_trips").insert({ list_id: S.list.id, store, amount, items: done.length }).select().single();
+    const { data: trip, error } = await db.from("shopping_trips").insert({ list_id: S.list.id, store, amount, items: done.length, finished_at: new Date().toISOString() }).select().single();
     if (error) return error.message;
     const now = new Date().toISOString();
     for (const x of done) { await db.from("shopping_items").update({ purchased_at: now, trip_id: trip.id }).eq("id", x.id); Object.assign(x, { purchased_at: now, trip_id: trip.id }); }
@@ -311,8 +315,8 @@ export function createShopping(ctx) {
     } catch (e) { if (e?.name !== "AbortError") { try { await navigator.clipboard.writeText(text); toast(t("Liste kopiert")); } catch {} } }
   }
   function monthStats() {
-    const m = new Date().toISOString().slice(0, 7);
-    const trips = S.trips.filter((x) => x.finished_at.slice(0, 7) === m);
+    const m = isoDay(new Date()).slice(0, 7);
+    const trips = S.trips.filter((x) => x.finished_at && isoDay(new Date(x.finished_at)).slice(0, 7) === m);
     return { n: trips.length, sum: trips.reduce((a, x) => a + (Number(x.amount) || 0), 0), withAmount: trips.some((x) => x.amount != null), budget: Number(S.list?.budget_month) || null };
   }
 
@@ -320,6 +324,11 @@ export function createShopping(ctx) {
   function rerender() { if (S.host?.isConnected) render(S.host); ctx.onChange?.(); }
   function render(host) {
     S.host = host;
+    if (!S.loaded && S.failed) {
+      host.innerHTML = `<div class="empty">${esc(t("Laden fehlgeschlagen: {x}", { x: S.failed }))}<button type="button" class="primary" id="shop-retry">${t("Nochmal versuchen")}</button></div>`;
+      host.querySelector("#shop-retry").onclick = () => { S.failed = null; render(host); };
+      return;
+    }
     if (!S.loaded) { host.innerHTML = `<div class="empty">${t("Lade …")}</div>`; load().then(() => render(host)); return; }
     const all = openItems();
     const stores = allStores().filter((k) => all.some((x) => x.store === k && !x.done));
@@ -367,7 +376,7 @@ export function createShopping(ctx) {
     html += `<div class="card shop-month"><div class="shop-month-top"><b>${t("Diesen Monat")}</b><button type="button" class="link-btn" id="shop-budget">${ms.budget ? t("Budget {x}", { x: eur(ms.budget) }) : t("Budget festlegen")}</button></div>
       <p class="small muted">${t("{n} Einkäufe", { n: ms.n })}${ms.withAmount || ms.budget ? " · " + eur(ms.sum) : ""}${ms.budget ? " · " + t("noch {x}", { x: eur(Math.max(0, ms.budget - ms.sum)) }) : ""}</p>
       ${ms.budget ? `<div class="bar shop-bar ${pct >= 100 ? "over" : pct >= 85 ? "warn" : ""}"><div style="width:${pct}%"></div></div>` : ""}
-      ${S.trips.length ? `<div class="shop-trips">${S.trips.slice(0, 5).map((x) => `<div><span>${fmtDay(x.finished_at.slice(0, 10), { weekday: "short", day: "numeric", month: "short" })} · ${esc(lbl(x.store ?? ""))}</span><span>${x.items} ${t("Artikel")}${x.amount != null ? " · " + eur(x.amount) : ""}</span></div>`).join("")}</div>` : ""}</div>`;
+      ${S.trips.length ? `<div class="shop-trips">${S.trips.slice(0, 5).map((x) => `<div><span>${fmtDay(isoDay(new Date(x.finished_at ?? Date.now())), { weekday: "short", day: "numeric", month: "short" })} · ${esc(lbl(x.store ?? ""))}</span><span>${x.items} ${t("Artikel")}${x.amount != null ? " · " + eur(x.amount) : ""}</span></div>`).join("")}</div>` : ""}</div>`;
     host.innerHTML = html;
 
     const byId = (id) => S.items.find((x) => x.id === id);
@@ -389,14 +398,13 @@ export function createShopping(ctx) {
       const p = parseOne(lastPart(inp.value) || "") ?? {};
       openEdit({ name: p.name ?? "", qty: p.qty ?? null, urgent: !!p.urgent });
     };
-    host.querySelector("#shop-add").onsubmit = async (e) => {
-      e.preventDefault();
+    host.querySelector("#shop-add").onsubmit = lock(async (e) => {
       const v = $("#shop-in").value.trim();
       if (!v) return;
       const r = await add(parseItems(v));
       if (r.msg) toast(r.msg, r.undo ? async () => { await r.undo(); rerender(); } : null);
       $("#shop-in")?.blur();
-    };
+    });
     host.querySelectorAll("[data-store]").forEach((b) => (b.onclick = () => { S.store = b.dataset.store; render(host); }));
     host.querySelectorAll("[data-shop-done]").forEach((b) => (b.onclick = () => { const x = byId(b.dataset.shopDone); if (x) setDone(x, !x.done); }));
     host.querySelectorAll("[data-shop-edit]").forEach((b) => (b.onclick = () => openEdit(byId(b.dataset.shopEdit))));

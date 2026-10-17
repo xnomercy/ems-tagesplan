@@ -9,7 +9,7 @@ const DEFAULTS = {
   routines: { active: true, priority: "normal", days: [1, 2, 3, 4, 5, 6, 7], prayer: null, anchor_prayer: null, at_time: null, notes: null },
   shopping_items: { done: false, urgent: false, qty: null, price: null, need_by: null, note: null, flag: null, purchased_at: null, trip_id: null, every_days: null },
   workout_sets: { kg: null, reps: null, rir: null, duration_sec: null, speed: null, incline: null },
-  daily_log: { water: 0, fasted: null, quran_pages: 0 },
+  daily_log: { water: 0, fasted: null, quran_pages: 0, zikr: 0, zikr_goal: null },
   deadlines: { done: false, notice_months: null, repeat_years: null, notes: null, item_id: null, lead_days: 30, kind: "sonstiges" },
 };
 

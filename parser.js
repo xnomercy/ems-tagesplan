@@ -65,10 +65,15 @@ export function parseDate(s, now) {
   if ((m = s.match(rx("übermorgen")))) return { date: addDays(base, 2), hit: m[0] };
   if ((m = s.match(rx("morgen")))) return { date: addDays(base, 1), hit: m[0] };
   if ((m = s.match(rx("heute")))) return { date: base, hit: m[0] };
-  if ((m = s.match(new RegExp(B + "(?:am\\s+)?(\\d{1,2})\\.\\s?(\\d{1,2})\\.?(\\d{4}|\\d{2})?\\.?", "iu")))) {
+  // 14.10. ist ein Datum, „um 14.30“ oder „von 9.30“ eine Uhrzeit; ungültige Tage wie 31.2. zählen nicht
+  for (const m of s.matchAll(new RegExp(B + "(?:am\\s+)?(\\d{1,2})\\.\\s?(\\d{1,2})\\.?(\\d{4}|\\d{2})?\\.?", "giu"))) {
+    const pre = s.slice(0, m.index);
+    if (!m[3] && (/(?:^|\s)(?:um|ab|gegen)\s*$/i.test(pre) || (/(?:^|\s)(?:von|bis)\s*$/i.test(pre) && !m[0].endsWith(".")))) continue;
+    const day = Number(m[1]), mon = Number(m[2]) - 1;
     const y = m[3] ? Number(m[3].length === 2 ? "20" + m[3] : m[3]) : base.getFullYear();
-    let d = new Date(y, Number(m[2]) - 1, Number(m[1]));
-    if (!m[3] && d < base) d = new Date(y + 1, Number(m[2]) - 1, Number(m[1]));
+    let d = new Date(y, mon, day);
+    if (mon > 11 || d.getMonth() !== mon) continue;
+    if (!m[3] && d < base) d = new Date(y + 1, mon, day);
     return { date: d, hit: m[0] };
   }
   if ((m = s.match(rx(`(?:am\\s+)?(\\d{1,2})\\.?\\s+(${MONTHS.join("|")})`)))) {
@@ -190,9 +195,10 @@ export function parse(text, now = new Date(), candidates = []) {
 
   const isRange = /von\s+\d{1,2}(?:[:.]\d{2})?\s*(?:uhr)?\s+bis\s+\d/i.test(s);
   const deadline = !isRange && DEADLINE_RE.test(s);
-  if (deadline) rest = rest.replace(new RegExp(DEADLINE_RE.source, "giu"), " ");
+  // Datum zuerst, sonst nimmt das Entfernen von „bis zum“ dem „bis zum 15.“ sein Datum
   const d = parseDate(rest, now);
   if (d.hit) rest = rest.replace(d.hit, " ");
+  if (deadline) rest = rest.replace(new RegExp(DEADLINE_RE.source, "giu"), " ");
   const t = parseTime(rest);
   if (t.hit) rest = rest.replace(t.hit, " ");
   // "… Ort Praxis Müller, Neuwied": alles nach dem Wort Ort ist der Ort

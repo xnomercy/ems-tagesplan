@@ -64,8 +64,8 @@ export function createGlaube(ctx) {
   async function setPage(page) {
     const g = goal() ?? { target: iso(addDays(new Date(), 30)), start_page: 1, since: today() };
     const q = quranState(g, daylog.all(), today());
-    // Aktuelle Seite setzen: Startseite so verschieben, dass sie passt
-    const ng = { ...g, start_page: Math.max(1, (g.start_page ?? 1) + (page - (q?.page ?? 0))) };
+    // Aktuelle Seite setzen: ab heute neu zählen, damit auch eine kleinere Seite greift
+    const ng = { ...g, since: today(), start_page: Math.max(1, page + 1 - (q?.todayRead ?? 0)) };
     await saveSettings({ quran_goal: ng });
     return { msg: t("Koran: Seite {p}", { p: page }) };
   }
