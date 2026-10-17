@@ -1,5 +1,5 @@
 // Hält die App-Dateien offline bereit. Daten kommen immer frisch von Supabase.
-const CACHE = "tagesplan-v31";
+const CACHE = "tagesplan-v32";
 const SHELL = ["./", "index.html", "style.css", "app.js", "parser.js", "parser-tr.js", "i18n.js", "intents.js", "training.js", "figures.js", "analyse.js", "einkauf.js", "offline.js", "daylog.js", "halal-scan.js", "glaube.js", "wellness.js", "fristen.js", "rueckblick.js", "dokument.js", "zikir.js", "koran.js", "version.json", "manifest.webmanifest", "icon-192.png", "ems-logo.png", "ems-mark.png"];
 
 // Koran-Text und Schriften ändern sich nie (neue Fassung = neuer Dateiname): einmal laden, über Versionen hinweg behalten
