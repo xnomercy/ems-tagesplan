@@ -9,7 +9,7 @@ export function createDayLog(db) {
     if (!loadedFrom || from < loadedFrom) loadedFrom = from;
     return data ?? [];
   }
-  const get = (d) => rows.get(d) ?? { on_date: d, water: 0, fasted: null, quran_pages: 0 };
+  const get = (d) => rows.get(d) ?? { on_date: d, water: 0, fasted: null, quran_pages: 0, zikr: 0, zikr_goal: null };
   async function set(d, patch) {
     const row = { ...get(d), ...patch, on_date: d, updated_at: new Date().toISOString() };
     delete row.user_id;

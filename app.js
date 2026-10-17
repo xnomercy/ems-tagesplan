@@ -8,6 +8,7 @@ import { withOffline } from "./offline.js";
 import { createDayLog } from "./daylog.js";
 import { createScanner } from "./halal-scan.js";
 import { createGlaube, ramadanActive, ramadanShift } from "./glaube.js";
+import { createZikir } from "./zikir.js";
 import { createWellness, sleepOffset } from "./wellness.js";
 import { createDeadlines } from "./fristen.js";
 import { createReview } from "./rueckblick.js";
@@ -264,7 +265,7 @@ function render() {
   if (state.view !== "heute") $("#greeting").textContent = t(PAGES[state.view]?.label ?? "");
   ({ heute: renderDay, plan: renderPlan, termine: renderTermine, mehr: renderMehr, vorrat: renderVorrat,
     training: () => training.render($("#view-training")), einkauf: () => shopping.render($("#view-einkauf")),
-    glaube: () => glaube.render($("#view-glaube")), fristen: () => deadlines.load().then(() => deadlines.render($("#view-fristen"))),
+    glaube: () => glaube.render($("#view-glaube")), zikir: () => zikir.render($("#view-zikir")), fristen: () => deadlines.load().then(() => deadlines.render($("#view-fristen"))),
     rueckblick: () => review.render($("#view-rueckblick")) })[state.view]();
   updateNav();
 }
@@ -327,6 +328,7 @@ function renderDay() {
   if (isToday) {
     if (db.pending()) html += `<div class="hint">${t("Offline: {n} Änderungen warten aufs Netz", { n: db.pending() })}</div>`;
     html += glaube.dayCard();
+    html += zikir.dayCard();
     html += wellness.waterCard();
     html += glaube.dayHint();
     html += wellness.sleepHint();
@@ -532,11 +534,16 @@ function renderVorrat() {
   $("#sup-add").onclick = () => openSupplySheet();
 }
 
+const MEHR_TABS = [["allgemein", "Allgemein"], ["gebet", "Gebet"], ["kalender", "Kalender"], ["konto", "Konto"]];
+try { state.mehrTab = localStorage.getItem("tagesplan-mehr-tab"); } catch {}
 function renderMehr() {
   const s = state.settings ?? {};
   const feed = `${SUPABASE_URL}/functions/v1/kalender?token=${s.calendar_token}`;
+  const tab = MEHR_TABS.some(([k]) => k === state.mehrTab) ? state.mehrTab : "allgemein";
+  const grp = (k) => `<div class="mehr-group" data-group="${k}" ${tab === k ? "" : "hidden"}>`;
   $("#view-mehr").innerHTML = `
-    <div class="section-head"><h3>${t("Einstellungen")}</h3></div>
+    <div class="seg mehr-tabs" id="mehr-tabs" role="tablist">${MEHR_TABS.map(([k, n]) => `<button type="button" role="tab" data-mtab="${k}" class="${tab === k ? "on" : ""}" aria-selected="${tab === k}">${t(n)}</button>`).join("")}</div>
+    ${grp("allgemein")}
     <div class="card">
       <p class="eyebrow">${t("Sprache")}</p>
       <div class="seg" id="lang-seg">
@@ -559,6 +566,8 @@ function renderMehr() {
       <form><select id="nag">${[10, 15, 20, 30, 45, 60].map((m) => `<option value="${m}" ${(s.nag_minutes ?? 20) === m ? "selected" : ""}>${t("{n} Minuten", { n: m })}</option>`).join("")}</select></form>
       <p class="small muted">${t("Gebete erinnern bis zum nächsten Gebet, Wichtiges bis du es abhakst (höchstens 5 Std., nachts ab 23:30 ist Ruhe).")}</p>
     </div>
+    </div>
+    ${grp("gebet")}
     <div class="card">
       <p class="eyebrow">${t("Gebetszeiten")}</p>
       <p>${s.lat != null ? t("Standort gesetzt ({x}).", { x: `${s.lat.toFixed(2)}, ${s.lng.toFixed(2)}` }) : t("Noch kein Standort gesetzt.")}</p>
@@ -569,6 +578,15 @@ function renderMehr() {
           .map(([v, n]) => `<option value="${v}" ${s.prayer_method === v ? "selected" : ""}>${t(n)}</option>`).join("")}
       </select></form>
     </div>
+    <div class="card">
+      <p class="eyebrow">${t("Zikir")}</p>
+      <label class="small muted" style="display:block">${t("Tagesziel")}</label>
+      <form id="zikr-goal-form" class="shop-add"><input id="zikr-goal" inputmode="numeric" pattern="[0-9]*" value="${zikir.goal()}" autocomplete="off"><button type="submit" class="primary" aria-label="${t("Speichern")}">✓</button></form>
+      <p class="small muted">${t("Gilt ab heute. Frühere Tage behalten ihr altes Ziel in der Statistik.")}</p>
+      <button type="button" class="btn" data-goto="zikir">${t("Zur Zikir-Seite")}</button>
+    </div>
+    </div>
+    ${grp("kalender")}
     <div class="dark-block">
       <p class="eyebrow">${t("Kalender verknüpfen")}</p>
       <p>${t("Abonniere diesen Link in deinem Kalender. Termine, Routinen und Gebetszeiten erscheinen dort mit Erinnerung und aktualisieren sich von selbst.")}</p>
@@ -579,6 +597,13 @@ function renderMehr() {
       <button class="btn fill" id="open-feed">${t("Im Kalender öffnen")}</button>
       <button class="btn" id="copy-feed">${t("Link kopieren")}</button>
     </div>
+    <div class="card">
+      <p class="eyebrow">${t("Homescreen-Widget")}</p>
+      <p class="small">${t("Nächstes Gebet und nächste Aufgabe auf dem Homescreen, über die kostenlose App Scriptable.")}</p>
+      <button class="btn fill" id="widget-setup">${t("Widget einrichten")}</button>
+    </div>
+    </div>
+    ${grp("konto")}
     <div class="card">
       <p class="eyebrow">${t("Passwort ändern")}</p>
       <form id="pw-form">
@@ -592,6 +617,8 @@ function renderMehr() {
       <p class="small" id="lock-state">${lockId() ? t("Beim Öffnen fragt die App nach Face ID.") : t("Sperrt die App beim Öffnen und nach einer Minute im Hintergrund. Entsperren mit Face ID oder Code des iPhones.")}</p>
       <button class="btn ${lockId() ? "" : "fill"}" id="lock-toggle">${t(lockId() ? "App-Sperre ausschalten" : "Mit Face ID sperren")}</button>
     </div>
+    </div>
+    ${grp("allgemein")}
     <div class="card">
       <p class="eyebrow">${t("Wasser und Schlaf")}</p>
       <label class="small muted" style="display:block">${t("Wasser pro Tag")}</label>
@@ -600,17 +627,26 @@ function renderMehr() {
       <form><select id="sleep-h">${[6, 6.5, 7, 7.5, 8, 8.5, 9].map((n) => `<option value="${n}" ${Number(s.sleep_hours ?? 7.5) === n ? "selected" : ""}>${t("{n} Std.", { n: n.toLocaleString(LOCALE()) })}</option>`).join("")}</select></form>
       <p class="small muted">${t("Die Schlafenszeit richtet sich nach Fajr: 15 Minuten vorher aufstehen, frühestens nach Isha ins Bett.")}</p>
     </div>
-    <div class="card">
-      <p class="eyebrow">${t("Homescreen-Widget")}</p>
-      <p class="small">${t("Nächstes Gebet und nächste Aufgabe auf dem Homescreen, über die kostenlose App Scriptable.")}</p>
-      <button class="btn fill" id="widget-setup">${t("Widget einrichten")}</button>
     </div>
+    ${grp("konto")}
     <div class="card">
       <p class="eyebrow">${t("Deine Daten")}</p>
       <p class="small">${t("Alles als Datei sichern: Routinen, Termine, Training, Körperwerte, Einkäufe, Fristen und Tageswerte.")}</p>
       <button class="btn" id="export">${t("Daten exportieren")}</button>
     </div>
-    <div class="card"><p class="small muted">${t("Angemeldet als {x}", { x: esc(state.user?.email) })}</p><button class="btn danger" id="logout">${t("Abmelden")}</button></div>`;
+    <div class="card"><p class="small muted">${t("Angemeldet als {x}", { x: esc(state.user?.email) })}</p><button class="btn danger" id="logout">${t("Abmelden")}</button></div>
+    </div>`;
+  document.querySelectorAll("#mehr-tabs [data-mtab]").forEach((b) => (b.onclick = () => {
+    state.mehrTab = b.dataset.mtab;
+    try { localStorage.setItem("tagesplan-mehr-tab", state.mehrTab); } catch {}
+    renderMehr();
+  }));
+  $("#zikr-goal-form").onsubmit = async (e) => {
+    e.preventDefault();
+    $("#zikr-goal").blur();
+    const r = await zikir.setGoal(Number($("#zikr-goal").value.replace(/\D/g, "")) || 0);
+    toast(r.msg);
+  };
   $("#pw-form").onsubmit = async (e) => {
     e.preventDefault();
     const pw = $("#pw-new").value;
@@ -820,7 +856,7 @@ document.addEventListener("click", async (ev) => {
 // Plus oben legt je nach Seite das Passende an
 $("#add").onclick = () => ({
   einkauf: () => shopping.openNew(), training: () => training.newExercise(), vorrat: () => openSupplySheet(), plan: () => openRoutineSheet(),
-  glaube: () => glaube.openAdd(), fristen: () => deadlines.openEdit(),
+  glaube: () => glaube.openAdd(), zikir: () => zikir.openAdd(), fristen: () => deadlines.openEdit(),
 }[state.view] ?? (() => openItemSheet()))();
 $("#greeting").onclick = () => { state.day = new Date(); switchView("heute"); };
 
@@ -835,13 +871,14 @@ const ICON = {
   einkauf: '<path d="M3 4h2.5l2.2 11.2a1.5 1.5 0 0 0 1.5 1.3h8.6a1.5 1.5 0 0 0 1.5-1.2L21 8H6.3"/><circle cx="9.5" cy="20" r="1.3"/><circle cx="17.5" cy="20" r="1.3"/>',
   vorrat: '<rect x="7" y="3" width="10" height="4" rx="1"/><path d="M8 7h8v12a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2z"/><path d="M8 12h8"/>',
   glaube: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/><path d="M14.5 7.2a3 3 0 1 0 0 5.6 3.6 3.6 0 1 1 0-5.6z"/>',
+  zikir: '<circle cx="12" cy="4.5" r="1.8"/><circle cx="17.3" cy="7.6" r="1.8"/><circle cx="17.3" cy="13.7" r="1.8"/><circle cx="12" cy="16.8" r="1.8"/><circle cx="6.7" cy="13.7" r="1.8"/><circle cx="6.7" cy="7.6" r="1.8"/><path d="M12 18.6V22"/>',
   fristen: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4"/><path d="M14 3v5h5M19 8v2"/><circle cx="17" cy="17" r="4"/><path d="M17 15.5V17l1 1"/>',
   rueckblick: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   mehr: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
 };
 const PAGES = {
   heute: { label: "Tag" }, termine: { label: "Termine" }, plan: { label: "Routinen" }, training: { label: "Training" },
-  einkauf: { label: "Einkauf" }, vorrat: { label: "Supplement-Vorrat" }, glaube: { label: "Koran & Ramadan" }, fristen: { label: "Fristen & Verträge" },
+  einkauf: { label: "Einkauf" }, vorrat: { label: "Supplement-Vorrat" }, glaube: { label: "Koran & Ramadan" }, zikir: { label: "Zikir" }, fristen: { label: "Fristen & Verträge" },
   rueckblick: { label: "Wochenrückblick" }, mehr: { label: "Einstellungen" },
 };
 function navCount(k) {
@@ -880,6 +917,7 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeNav()
   $("#sidenav").addEventListener("touchend", (e) => { if (x0 != null && e.changedTouches[0].clientX - x0 > 60) closeNav(); x0 = null; });
 }
 function switchView(v) {
+  if (state.view === "zikir" && v !== "zikir") zikir.flush();
   state.view = v;
   document.querySelectorAll(".tabs > button").forEach((b) => b.classList.toggle("active", b.dataset.view === v));
   for (const name of Object.keys(PAGES)) $(`#view-${name}`).hidden = name !== v;
@@ -1234,6 +1272,7 @@ const daylog = createDayLog(db);
 const common = { db, t, esc, $, toast, openSheet, closeSheet, sheet, form, fmtDay, LOCALE, enhancePickers: (f) => enhancePickers(f), today: () => isoDate(new Date()), onChange: () => render() };
 const glaube = createGlaube({ ...common, daylog, settings: () => state.settings, saveSettings, getPt: () => state.pt });
 const wellness = createWellness({ ...common, daylog, settings: () => state.settings, getPt: () => state.pt });
+const zikir = createZikir({ ...common, daylog, settings: () => state.settings, saveSettings });
 const deadlines = createDeadlines({ ...common, onChange: () => { state.upcoming = null; refresh(); }, onImport: () => importer.open() });
 const importer = createImport({ ...common, deadlines, lang: () => LANG, openItemSheet: (a, b) => openItemSheet(a, b), onChange: () => { state.upcoming = null; refresh(); } });
 const review = createReview({ ...common, daylog, routines: () => state.routines, settings: () => state.settings, budget: () => null });
@@ -1315,6 +1354,7 @@ const EXAMPLES = {
   einkauf: ["Milch, 6 Eier und 500 g Hack auf die Einkaufsliste", "Milch gekauft", "Scanne Barcode"],
   vorrat: ["Magnesium aufgefüllt 60", "Wie lange reicht Magnesium", "Noch 40 Ashwagandha"],
   glaube: ["Koran 5 Seiten gelesen", "Koran-Ziel bis 30. März", "Heute gefastet"],
+  zikir: ["1000 Zikir gemacht", "Wie viel Zikir heute", "Zikir-Ziel 6000"],
   fristen: ["TÜV am 12.3.2027", "Handyvertrag endet am 1.8.2027 Kündigungsfrist 3 Monate", "Brief scannen"],
   rueckblick: ["Zeig den Wochenrückblick", "Wann soll ich schlafen", "2 Gläser Wasser"],
   mehr: ["Sprich Türkisch", "Dunkler Modus", "Schlafziel 8 Stunden"],
@@ -1327,6 +1367,7 @@ const EXAMPLES_TR = {
   einkauf: ["Alışveriş listesine süt ve yumurta ekle", "Süt aldım", "Barkod tara"],
   vorrat: ["Magnezyum doldurdum 60", "Magnezyum ne kadar yeter", "40 tane ashwagandha kaldı"],
   glaube: ["Kuran 5 sayfa okudum", "Kuran hatmi 30 mart'a kadar", "Oruç tuttum"],
+  zikir: ["1000 zikir çektim", "Bugün ne kadar zikir", "Zikir hedefi 6000"],
   fristen: ["Muayene 12.3.2027", "Telefon sözleşmesi 1.8.2027 fesih süresi 3 ay", "Belge oku"],
   rueckblick: ["Haftalık özeti göster", "Ne zaman yatmalıyım", "2 bardak su"],
   mehr: ["Almancaya geç", "Koyu mod", "Uyku hedefi 8 saat"],
@@ -1435,13 +1476,20 @@ function describe(cmd) {
   if (cmd.type === "sprache") return [t("Sprache"), cmd.lang === "tr" ? "Türkçe" : "Deutsch"];
   if (cmd.type === "theme") return [t("Darstellung"), t({ auto: "Automatisch", light: "Hell", dark: "Dunkel" }[cmd.theme])];
   if (cmd.type === "gruppe") return [t("Routinen"), t(cmd.g === "zeit" ? "Nach Tageszeit" : "Nach Bereich")];
-  if (cmd.type === "zeige") return [t("Anzeigen"), cmd.date ? fmtDay(cmd.date, { weekday: "long", day: "numeric", month: "long" }) : t({ heute: "Tag", termine: "Termine", plan: "Routinen", mehr: "Einstellungen", monat: "Monat", verlauf: "Verlauf", vorrat: "Supplement-Vorrat", training: "Training", einkauf: "Einkaufsliste", glaube: "Koran & Ramadan", fristen: "Fristen & Verträge", rueckblick: "Wochenrückblick" }[cmd.view])];
+  if (cmd.type === "zeige") return [t("Anzeigen"), cmd.date ? fmtDay(cmd.date, { weekday: "long", day: "numeric", month: "long" }) : t({ heute: "Tag", termine: "Termine", plan: "Routinen", mehr: "Einstellungen", monat: "Monat", verlauf: "Verlauf", vorrat: "Supplement-Vorrat", training: "Training", einkauf: "Einkaufsliste", glaube: "Koran & Ramadan", zikir: "Zikir", fristen: "Fristen & Verträge", rueckblick: "Wochenrückblick" }[cmd.view])];
   if (cmd.type === "suche") return [t("Suche"), cmd.q];
   if (cmd.type === "wasser") return [t("Wasser"), cmd.action === "status" ? t("Stand anzeigen") : t("+{n} Gläser ({l} l)", { n: cmd.n, l: wellness.liters(cmd.n) })];
   if (cmd.type === "scan") return [t("Packung scannen"), t("Halal-Prüfung")];
   if (cmd.type === "import") return [t("Dokument"), t("Termine aus Foto, PDF oder Text übernehmen")];
   if (cmd.type === "schlaf") return [t("Schlaf"), cmd.action === "set" ? t("Ziel {n} Std.", { n: cmd.hours }) : t("Schlafenszeit anzeigen")];
   if (cmd.type === "frist") return [t("Frist"), `${cmd.title} · ${fmtDay(cmd.due, { day: "numeric", month: "short", year: "numeric" })}${cmd.notice ? " · " + t("{n} Monate Kündigungsfrist", { n: cmd.notice }) : ""}`];
+  if (cmd.type === "zikir") {
+    const f = (n) => Number(n).toLocaleString(LOCALE());
+    if (cmd.action === "add") return [t("Zikir"), "+" + f(cmd.n)];
+    if (cmd.action === "set") return [t("Zikir"), t("Tagesstand {n}", { n: f(cmd.n) })];
+    if (cmd.action === "goal") return [t("Zikir-Tagesziel"), f(cmd.n)];
+    return [t("Zikir"), t("Stand anzeigen")];
+  }
   if (cmd.type === "glaube") {
     if (cmd.action === "pages") return [t("Koran"), t("+{n} Seiten", { n: cmd.pages })];
     if (cmd.action === "page") return [t("Koran"), t("Seite {p}", { p: cmd.page })];
@@ -1598,6 +1646,11 @@ async function runIntent(c) {
       if (c.action === "status") { const n = daylog.get(isoDate(new Date())).water ?? 0; return toast(t("Wasser: {n} von {g} Gläsern ({l} l)", { n, g: wellness.goal(), l: wellness.liters(n) })); }
       const r = await wellness.addWater(c.n);
       toast(r.msg, async () => { await r.undo(); render(); });
+      return render();
+    }
+    case "zikir": {
+      const r = await zikir.runVoice(c);
+      if (r?.msg) toast(r.msg, r.undo ? async () => { await r.undo(); render(); } : null);
       return render();
     }
     case "glaube": {
@@ -1860,7 +1913,7 @@ function toast(msg, undo) {
   toastTimer = setTimeout(hide, undo ? 6000 : 3000);
 }
 
-document.addEventListener("visibilitychange", () => { if (!document.hidden && state.user) refresh(); if (!document.hidden) checkVersion(); });
+document.addEventListener("visibilitychange", () => { if (document.hidden) zikir.flush(); if (!document.hidden && state.user) refresh(); if (!document.hidden) checkVersion(); });
 
 // ---------- Hell / Dunkel ----------
 let themePref = "auto";
