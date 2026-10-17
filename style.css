@@ -792,3 +792,5 @@ button.btn.imp-btn { min-height: 52px; margin-top: 8px; border-radius: 14px; bor
 .kr-fopt small { color: var(--muted); font-weight: 700; }
 .kr-fopt.on { border-color: var(--petrol); box-shadow: 0 0 0 1px var(--petrol); }
 .card .btn.kr-open { margin: 0 0 12px; }
+/* Koranblatt bleibt auch im dunklen Modus weiß wie Papier */
+:root[data-theme="dark"] .kr-page { --card: #FFFFFF; --text: #0B3D4A; --muted: #5F7A80; --line: #E1EAE8; --soft: #E6F1F2; --petrol: #1F7A8C; --tuerkis: #51B8C4; border-color: #FFFFFF; }
