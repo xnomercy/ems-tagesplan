@@ -19,7 +19,7 @@ const SUPABASE_URL = "https://hpxdhtuabzqwyslzcmbt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kKiQdntJd893YvBPFx7fhw_FYzlwwtz";
 const DEMO = new URLSearchParams(location.search).has("demo");
 // Bei jeder Veröffentlichung zusammen mit version.json und dem Cache-Namen in sw.js hochzählen
-const APP_VERSION = "32";
+const APP_VERSION = "33";
 const rawDb = DEMO
   ? (await import("./mock.js")).db
   : (await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm").catch((e) => {
@@ -528,11 +528,13 @@ function renderVorrat() {
       ${STACK.filter((n) => !state.supplies.some((x) => x.name.toLowerCase() === n.toLowerCase())).length ? `<p class="small muted" style="margin-top:12px">${t("Aus deinem Stack")}</p>
       <div class="chips">${STACK.filter((n) => !state.supplies.some((x) => x.name.toLowerCase() === n.toLowerCase())).map((n) => `<button type="button" class="chip" data-sup-new="${esc(n)}">+ ${esc(n)}</button>`).join("")}</div>` : ""}
       <button class="btn fill" id="sup-add">${t("Supplement hinzufügen")}</button>
+      <button type="button" class="btn fill shop-scan" id="sup-scan">${t("Packung scannen")}</button>
     </div>`;
   $("#view-vorrat").querySelectorAll("[data-sup]").forEach((b) => (b.onclick = () => openSupplySheet(state.supplies.find((x) => x.id === b.dataset.sup))));
   $("#view-vorrat").querySelectorAll("[data-refill]").forEach((b) => (b.onclick = () => openRefill(state.supplies.find((x) => x.id === b.dataset.refill))));
   $("#view-vorrat").querySelectorAll("[data-sup-new]").forEach((b) => (b.onclick = () => openSupplySheet({ name: b.dataset.supNew })));
   $("#sup-add").onclick = () => openSupplySheet();
+  $("#sup-scan").onclick = () => scanner.open();
 }
 
 const MEHR_TABS = [["allgemein", "Allgemein"], ["gebet", "Gebet"], ["kalender", "Kalender"], ["konto", "Konto"]];
@@ -1279,7 +1281,8 @@ const koran = createKoran({ ...common, glaube });
 const deadlines = createDeadlines({ ...common, onChange: () => { state.upcoming = null; refresh(); }, onImport: () => importer.open() });
 const importer = createImport({ ...common, deadlines, lang: () => LANG, openItemSheet: (a, b) => openItemSheet(a, b), onChange: () => { state.upcoming = null; refresh(); } });
 const review = createReview({ ...common, daylog, routines: () => state.routines, settings: () => state.settings, budget: () => null });
-const scanner = createScanner({ ...common, DEMO, onAdd: async (name, res) => {
+const scanner = createScanner({ ...common, DEMO, onAdd: async (name, res, to) => {
+  if (to === "vorrat") return openSupplySheet(state.supplies.find((x) => x.name.toLowerCase() === name.toLowerCase()) ?? { name });
   const r = await shopping.add([{ name, note: res.verdict === "pruefen" ? t("Zutaten prüfen") : null }]);
   render();
   return r;
