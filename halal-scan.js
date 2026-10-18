@@ -116,6 +116,8 @@ export function remember(product, res) {
   try { localStorage.setItem(SKEY, JSON.stringify(list)); } catch {}
 }
 export const recentScans = () => { try { return JSON.parse(localStorage.getItem(SKEY)) ?? []; } catch { return []; } };
+// Nur der Produktname, ohne Marke und Füllmenge
+export const shortName = (p) => (p.product_name_de || p.product_name || p.product_name_tr || p.code || "").replace(/\s+\d+([.,]\d+)?\s?(g|kg|ml|l|cl|stk\.?|st\.?)\b\.?$/iu, "").trim();
 export const productName = (p) => [p.product_name_de || p.product_name || p.product_name_tr || "", p.brands?.split(",")[0]].filter(Boolean).join(" · ") || p.code;
 
 export const VERDICT = {
@@ -213,15 +215,18 @@ export function createScanner(ctx) {
       <div class="scan-verdict ${cls}">${t(label)}</div>
       ${res.reasons.length ? `<ul class="scan-reasons">${res.reasons.map((x) => `<li class="vk-${x.level}">${esc(t(x.text))}</li>`).join("")}</ul>` : ""}
       ${res.ingredients ? `<details class="scan-ing"><summary>${t("Zutaten")}</summary><p class="small">${esc(res.ingredients)}</p></details>` : ""}
-      ${res.verdict === "haram" ? "" : `<div class="sheet-actions"><button type="button" class="primary" id="scan-add">${t("Auf die Einkaufsliste")}</button></div>`}
+      ${res.verdict === "haram" ? "" : `<label>${t("Übernehmen als")}</label><input name="sname" id="scan-name" autocomplete="off" value="${esc(shortName(p))}">
+      <div class="sheet-actions row"><button type="button" class="primary" data-scan-to="liste">${t("Einkaufsliste")}</button><button type="button" class="primary" data-scan-to="vorrat">${t("Vorrat")}</button></div>`}
       <button type="button" class="ghost" id="scan-again">${t("Nächste Packung scannen")}</button>`;
     form.querySelector("#scan-again").onclick = open;
-    form.querySelector("#scan-add")?.addEventListener("click", async () => {
-      const short = (p.product_name_de || p.product_name || name).split(" · ")[0];
-      closeSheet(sheet);
-      const r = await onAdd(short, res);
+    form.querySelectorAll("[data-scan-to]").forEach((b) => (b.onclick = async () => {
+      const short = form.querySelector("#scan-name").value.trim() || shortName(p);
+      const to = b.dataset.scanTo;
+      // Vorrat öffnet das eigene Formular im selben Blatt, Einkaufsliste geht gleich zurück zur Kamera für die nächste Packung
+      const r = await onAdd(short, res, to);
       if (r?.msg) toast(r.msg, r.undo);
-    });
+      if (to === "liste") open();
+    }));
   }
 
   return { open, check, show };

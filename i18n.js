@@ -861,6 +861,7 @@ const TR = {
   "Die Packung ist nicht in Open Food Facts. Tipp die Zutaten ab oder füge sie ein, dann prüft die App sie.": "Ürün Open Food Facts'te yok. İçindekileri yaz veya yapıştır, uygulama kontrol etsin.",
   "Zutaten": "İçindekiler",
   "Nächste Packung scannen": "Sonraki ürünü tara",
+  "Übernehmen als": "Bu adla ekle",
   "Hatim geschafft! Mâşallah.": "Hatim tamam! Maşallah.",
   "Koran: Seite {p}, heute noch {n}": "Kuran: sayfa {p}, bugün {n} sayfa kaldı",
   "Koran: {n} Seiten eingetragen": "Kuran: {n} sayfa kaydedildi",
